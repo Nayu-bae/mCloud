@@ -8,7 +8,7 @@ import { Files } from '../dist/files.js';
 import { openDatabase } from '../dist/database.js';
 
 test('file records and uploader links are atomic and constrained', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'mclout-files-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'mcloud-files-test-'));
   const path = join(dir, 'test.sqlite');
   const users = new Users(path);
   await users.bootstrap('owner', 'test-owner-password');

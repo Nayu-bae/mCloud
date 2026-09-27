@@ -1,6 +1,7 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { shareRoutes } from './share-routes.js';
 import { fileRoutes } from './file-routes.js';
 import { Files } from './files.js';
 import { Users, UserInputError } from './users.js';
@@ -10,7 +11,7 @@ const app = express();
 const lifetime = 8 * 60 * 60 * 1000;
 const sessions = new Map<string, { userId: number; expiresAt: number }>();
 const attempts = new Map<string, { count: number; until: number }>();
-const token = (req: express.Request) => req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('mclout_session='))?.slice(15);
+const token = (req: express.Request) => req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('mcloud_session='))?.slice(15);
 const cookieOptions = { httpOnly: true, secure: production, sameSite: 'strict' as const, path: '/' };
 app.disable('x-powered-by');
 app.use((_req, res, next) => {
@@ -34,7 +35,11 @@ const currentUser = (req: express.Request) => {
   const session = sessions.get(token(req) || '');
   return session && session.expiresAt > Date.now() ? users.get(session.userId) : undefined;
 };
-if (storage) app.use('/api/files', fileRoutes(storage.files, storage.directory, currentUser, storage.maxUpload));
+if (storage) {
+  app.use('/api/files', fileRoutes(storage.files, storage.directory, currentUser, storage.maxUpload));
+  app.use('/s', shareRoutes(storage.files, storage.directory));
+}
+app.get('/share.js', (_req, res) => res.sendFile(fileURLToPath(new URL('./share-client.js', import.meta.url))));
 app.get('/api/session', (req, res) => {
   const user = currentUser(req);
   res.status(user ? 200 : 401).json({ authenticated: Boolean(user), user });
@@ -52,12 +57,12 @@ app.post('/api/login', async (req, res, next) => {
   sessions.delete(token(req) || '');
   const session = randomBytes(32).toString('hex');
   sessions.set(session, { userId: user.id, expiresAt: Date.now() + lifetime });
-  res.cookie('mclout_session', session, { ...cookieOptions, maxAge: lifetime }).json({ authenticated: true, user });
+  res.cookie('mcloud_session', session, { ...cookieOptions, maxAge: lifetime }).json({ authenticated: true, user });
   } catch (error) { next(error); }
 });
 app.post('/api/logout', (req, res) => {
   sessions.delete(token(req) || '');
-  res.clearCookie('mclout_session', cookieOptions).json({ authenticated: false });
+  res.clearCookie('mcloud_session', cookieOptions).json({ authenticated: false });
 });
 app.use('/api/admin', (req, res, next) => {
   const user = currentUser(req);

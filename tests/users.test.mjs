@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Users } from '../dist/users.js';
 
 test('accounts persist, use salted hashes, and bootstrap only once', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'mclout-test-'));
+  const folder = mkdtempSync(join(tmpdir(), 'mcloud-test-'));
   const path = join(folder, 'users.sqlite');
   let users = new Users(path);
   try {
@@ -35,7 +35,7 @@ test('accounts persist, use salted hashes, and bootstrap only once', async () =>
 });
 
 test('rejects bad credentials, duplicate users, weak new passwords and SQL injection', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'mclout-test-'));
+  const folder = mkdtempSync(join(tmpdir(), 'mcloud-test-'));
   const users = new Users(join(folder, 'users.sqlite'));
   try {
     await users.bootstrap('owner', 'a-long-test-password');
@@ -50,7 +50,7 @@ test('rejects bad credentials, duplicate users, weak new passwords and SQL injec
 });
 
 test('backup includes committed users while source is open and never overwrites files', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'mclout-test-'));
+  const folder = mkdtempSync(join(tmpdir(), 'mcloud-test-'));
   const users = new Users(join(folder, 'source.sqlite'));
   try {
     await users.bootstrap('owner', 'a-long-test-password');

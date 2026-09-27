@@ -9,4 +9,4 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT m
 const users = new Users();
 await users.bootstrap(process.env.SITE_USERNAME, process.env.SITE_PASSWORD);
 const app = createApp(users, process.env.NODE_ENV === 'production', { files: new Files(), directory: fileURLToPath(new URL('../data/uploads/', import.meta.url)) });
-app.listen(port, () => console.log(`mClout running at http://localhost:${port}`));
+app.listen(port, () => console.log(`mCloud running at http://localhost:${port}`));

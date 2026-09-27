@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/mClout.iml" filepath="$PROJECT_DIR$/.idea/mClout.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/mCloud.iml" filepath="$PROJECT_DIR$/.idea/mCloud.iml" />
     </modules>
   </component>
 </project>

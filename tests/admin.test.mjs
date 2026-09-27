@@ -9,7 +9,7 @@ import { Users, hashPassword } from '../dist/users.js';
 import { createApp } from '../dist/app.js';
 
 test('migration preserves legacy credentials and promotes only the original account', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'mclout-migration-test-'));
+  const folder = mkdtempSync(join(tmpdir(), 'mcloud-migration-test-'));
   const path = join(folder, 'users.sqlite');
   const legacy = new DatabaseSync(path);
   legacy.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT 'now') STRICT; PRAGMA user_version = 1;`);
@@ -28,7 +28,7 @@ test('migration preserves legacy credentials and promotes only the original acco
 });
 
 test('admin-only creation, login for new users, no role escalation, and logout protection', async () => {
-  const folder = mkdtempSync(join(tmpdir(), 'mclout-admin-test-'));
+  const folder = mkdtempSync(join(tmpdir(), 'mcloud-admin-test-'));
   const users = new Users(join(folder, 'users.sqlite'));
   await users.bootstrap('owner', 'owner-test-password');
   const server = createApp(users).listen(0, '127.0.0.1');

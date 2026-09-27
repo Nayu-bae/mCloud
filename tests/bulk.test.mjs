@@ -1,0 +1,65 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { Users } from '../dist/users.js';
+import { Files } from '../dist/files.js';
+import { createApp } from '../dist/app.js';
+
+test('bulk moves preserve populated folders; deletes and failed moves are all-or-nothing', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'mcloud-bulk-test-'));
+  const database=join(dir,'test.sqlite');const directory=join(dir,'uploads');
+  const users=new Users(database);const files=new Files(database);
+  await users.bootstrap('owner','owner-test-password');
+  const member=await users.add('member','member-test-password');
+  const server=createApp(users,false,{files,directory}).listen(0,'127.0.0.1');
+  await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
+  const post=(path,body,cookie='')=>fetch(base+path,{method:'POST',headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const login=async(username,password)=>(await post('/api/login',{username,password})).headers.get('set-cookie').split(';')[0];
+  try {
+    const cookie=await login('member','member-test-password');const owner=await login('owner','owner-test-password');
+    const full=files.createFolder(member.id,'Full',null);
+    const child=files.createFolder(member.id,'Child',full.id);
+    const empty=files.createFolder(member.id,'Empty',null);
+    const destination=files.createFolder(member.id,'Destination',null);
+    const upload=async(name,folderId)=> (await (await fetch(base+'/api/files',{method:'POST',headers:{cookie,'Content-Type':'application/octet-stream','X-File-Name':name,'X-Folder-Id':folderId===null?'':String(folderId)},body:'private contents'})).json()).file;
+    const inside=await upload('inside.txt',child.id);const loose=await upload('loose.txt',null);
+    const bulk=(body,auth=cookie)=>post('/api/files/bulk',body,auth);
+    assert.equal((await bulk({action:'delete',fileIds:[loose.id],folderIds:[]},'')).status,401);
+    assert.equal((await bulk({action:'move',fileIds:[],folderIds:[full.id],destination:null},owner)).status,404);
+    const blocked=await bulk({action:'delete',fileIds:[loose.id,inside.id],folderIds:[empty.id,full.id]});
+    assert.equal(blocked.status,409);
+    assert.ok(files.getForUser(member.id,loose.id));assert.ok(files.folder(member.id,empty.id));assert.equal(readdirSync(directory).length,2);
+    for (const target of [full.id,child.id]) assert.equal((await bulk({action:'move',fileIds:[loose.id],folderIds:[full.id],destination:target})).status,409);
+    assert.equal(files.getForUser(member.id,loose.id).folder_id,null);
+    const moved=await bulk({action:'move',fileIds:[loose.id],folderIds:[full.id,empty.id],destination:destination.id});
+    assert.equal(moved.status,200);
+    assert.equal(files.folder(member.id,full.id).parent_id,destination.id);
+    assert.equal(files.folder(member.id,child.id).parent_id,full.id);
+    assert.equal(files.getForUser(member.id,inside.id).folder_id,child.id);
+    assert.equal(files.getForUser(member.id,loose.id).folder_id,destination.id);
+    assert.equal(await (await fetch(base+`/api/files/${inside.id}/download`,{headers:{cookie}})).text(),'private contents');
+    assert.equal((await bulk({action:'move',fileIds:[inside.id],folderIds:[full.id],destination:null})).status,409);
+    // A later conflicting folder must roll back earlier moves in the same request.
+    const first=files.createFolder(member.id,'First',null);const conflict=files.createFolder(member.id,'Conflict',null);
+    files.createFolder(member.id,'conflict',destination.id);
+    assert.equal((await bulk({action:'move',fileIds:[inside.id],folderIds:[first.id,conflict.id],destination:destination.id})).status,409);
+    assert.equal(files.folder(member.id,first.id).parent_id,null);
+    assert.equal(files.folder(member.id,conflict.id).parent_id,null);
+    assert.equal(files.getForUser(member.id,inside.id).folder_id,child.id);
+    const foreign=files.createFolder(users.list()[0].id,'Foreign',null);
+    assert.equal((await bulk({action:'move',fileIds:[loose.id],folderIds:[],destination:foreign.id})).status,404);
+    assert.equal((await bulk({action:'delete',fileIds:[loose.id,999999],folderIds:[]})).status,404);
+    assert.ok(files.getForUser(member.id,loose.id));
+    assert.equal((await bulk({action:'move',fileIds:[loose.id],folderIds:[full.id],destination:null})).status,200);
+    assert.equal(files.folder(member.id,full.id).parent_id,null);
+    assert.equal((await bulk({action:'delete',fileIds:[loose.id],folderIds:[empty.id]})).status,200);
+    assert.equal(files.getForUser(member.id,loose.id),undefined);assert.equal(files.folder(member.id,empty.id),undefined);
+    assert.equal(readdirSync(directory).length,1);
+    assert.equal((await bulk({action:'delete',fileIds:[],folderIds:[]})).status,400);
+    assert.equal((await bulk({action:'move',fileIds:[],folderIds:[full.id]})).status,400);
+    assert.equal((await bulk({action:'delete',fileIds:['1'],folderIds:[]})).status,400);
+  } finally { await new Promise(resolve=>server.close(resolve));users.close();files.close();rmSync(dir,{recursive:true,force:true}); }
+});

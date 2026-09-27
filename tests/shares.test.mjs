@@ -1,0 +1,64 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { createHash } from 'node:crypto';
+import { Users } from '../dist/users.js';
+import { Files } from '../dist/files.js';
+import { openDatabase } from '../dist/database.js';
+import { createApp } from '../dist/app.js';
+
+test('temporary links are file-scoped, persistent, expiring, revocable, and owner-controlled', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'mcloud-shares-test-'));
+  const database=join(dir,'test.sqlite');const directory=join(dir,'uploads');
+  const users=new Users(database);const files=new Files(database);
+  await users.bootstrap('owner','owner-test-password');const member=await users.add('member','member-test-password');
+  const server=createApp(users,false,{files,directory}).listen(0,'127.0.0.1');await once(server,'listening');
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const json=(path,method,body,cookie='')=>fetch(base+path,{method,headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const login=async(username,password)=>(await json('/api/login','POST',{username,password})).headers.get('set-cookie').split(';')[0];
+  try {
+    const cookie=await login('member','member-test-password');const owner=await login('owner','owner-test-password');
+    const upload=async(name,body)=>(await (await fetch(base+'/api/files',{method:'POST',headers:{cookie,'Content-Type':'application/octet-stream','X-File-Name':name},body})).json()).file;
+    const file=await upload('private.html','<script>alert("not executed")</script>');
+    const other=await upload('other.txt','other secret');
+    const endpoint=`/api/files/${file.id}/shares`;
+    assert.equal((await json(endpoint,'POST',{durationMinutes:60})).status,401);
+    assert.equal((await json(endpoint,'POST',{durationMinutes:60},owner)).status,404);
+    for (const durationMinutes of [0,-1,43201,1.5,'60',null]) assert.equal((await json(endpoint,'POST',{durationMinutes},cookie)).status,400);
+    assert.equal((await fetch(base+endpoint,{headers:{cookie:owner}})).status,404);
+    const before=Date.now();const created=await json(endpoint,'POST',{durationMinutes:60},cookie);assert.equal(created.status,201);
+    const share=await created.json();assert.ok(share.expiresAt>=before+60*60000);
+    const token=share.path.split('/').at(-1);assert.match(token,/^[A-Za-z0-9_-]{43}$/);
+    const db=openDatabase(database);
+    const stored=db.prepare('SELECT token_hash FROM file_shares WHERE id = ?').get(share.id).token_hash;
+    assert.equal(stored,createHash('sha256').update(token).digest('hex'));assert.notEqual(stored,token);
+    const reopened=new Files(database);assert.equal(reopened.resolveShare(token).id,file.id);reopened.close();
+    const page=await fetch(base+share.path);assert.equal(page.status,200);assert.match(page.headers.get('x-robots-tag'),/noindex/);
+    const info=await (await fetch(base+share.path+'/info')).json();assert.equal(info.name,'private.html');assert.equal(info.kind,'text');
+    assert.equal('storage_key' in info,false);assert.equal('userId' in info,false);
+    const content=await fetch(base+share.path+'/content');assert.equal(content.status,200);assert.match(content.headers.get('content-type'),/^text\/plain/);assert.match(content.headers.get('content-security-policy'),/sandbox/);
+    assert.equal(content.headers.get('cache-control'),'no-store');assert.equal(content.headers.get('referrer-policy'),'no-referrer');
+    const download=await fetch(base+share.path+'/download');assert.match(download.headers.get('content-disposition'),/^attachment/);assert.equal(await download.text(),'<script>alert("not executed")</script>');
+    assert.equal((await fetch(base+`/api/files/${other.id}/download`)).status,401);
+    const listed=await (await fetch(base+endpoint,{headers:{cookie}})).json();assert.equal(listed.links.length,1);assert.equal('token_hash' in listed.links[0],false);assert.equal('token' in listed.links[0],false);
+    assert.equal((await json(`${endpoint}/${share.id}`,'DELETE',{},owner)).status,404);
+    assert.equal((await json(`/api/files/${other.id}/shares/${share.id}`,'DELETE',{},cookie)).status,404);
+    assert.equal((await json(`${endpoint}/${share.id}`,'DELETE',{},cookie)).status,204);
+    for (const suffix of ['', '/info','/content','/download']) assert.equal((await fetch(base+share.path+suffix)).status,404);
+    const expiring=await (await json(endpoint,'POST',{durationMinutes:1},cookie)).json();
+    db.prepare('UPDATE file_shares SET created_at = ?, expires_at = ? WHERE id = ?').run(Date.now()-120000,Date.now()-60000,expiring.id);
+    for (const suffix of ['', '/info','/content','/download']) assert.equal((await fetch(base+expiring.path+suffix)).status,404);
+    assert.equal((await fetch(base+'/s/'+'x'.repeat(43)+'/download')).status,404);
+    const deleted=await (await json(endpoint,'POST',{durationMinutes:43200},cookie)).json();
+    await json(`/api/files/${file.id}`,'DELETE',{},cookie);
+    assert.equal((await fetch(base+deleted.path+'/download')).status,404);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM file_shares WHERE file_id = ?').get(file.id).n,0);
+    // Owner-side active-link cap prevents accidentally creating endless active links.
+    for(let i=0;i<20;i++) files.createShare(member.id,other.id,1);
+    assert.throws(()=>files.createShare(member.id,other.id,1),/20 active links/);
+    db.close();
+  } finally {await new Promise(resolve=>server.close(resolve));users.close();files.close();rmSync(dir,{recursive:true,force:true});}
+});

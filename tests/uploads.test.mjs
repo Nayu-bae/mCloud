@@ -9,7 +9,7 @@ import { Files } from '../dist/files.js';
 import { createApp } from '../dist/app.js';
 
 test('private uploads, download, rename, delete, limits and restart recovery', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'mclout-upload-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'mcloud-upload-test-'));
   const database = join(dir, 'test.sqlite');
   const directory = join(dir, 'uploads');
   const users = new Users(database);
