@@ -8,5 +8,5 @@ const port = Number(process.env.PORT || 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid TCP port.');
 const users = new Users();
 await users.bootstrap(process.env.SITE_USERNAME, process.env.SITE_PASSWORD);
-const app = createApp(users, process.env.NODE_ENV === 'production', { files: new Files(), directory: fileURLToPath(new URL('../data/uploads/', import.meta.url)) });
+const app = createApp(users, process.env.NODE_ENV === 'production', { files: new Files(), directory: fileURLToPath(new URL('../data/uploads/', import.meta.url)), publicUrl: process.env.PUBLIC_URL });
 app.listen(port, () => console.log(`mCloud running at http://localhost:${port}`));

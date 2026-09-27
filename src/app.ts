@@ -8,7 +8,7 @@ import { fileRoutes } from './file-routes.js';
 import { Files } from './files.js';
 import { Users, UserInputError } from './users.js';
 
-export function createApp(users: Users, production = false, storage?: { files: Files; directory: string; maxUpload?: number }) {
+export function createApp(users: Users, production = false, storage?: { files: Files; directory: string; maxUpload?: number; publicUrl?: string }) {
 const app = express();
 const lifetime = 8 * 60 * 60 * 1000;
 const sessions = new Map<string, { userId: number; expiresAt: number }>();
@@ -39,7 +39,7 @@ const currentUser = (req: express.Request) => {
 };
 if (storage) {
   app.use('/api/files', fileRoutes(storage.files, storage.directory, currentUser, storage.maxUpload));
-  app.use('/s', shareRoutes(storage.files, storage.directory));
+  app.use('/s', shareRoutes(storage.files, storage.directory, storage.publicUrl));
 }
 app.get('/share.js', (_req, res) => res.sendFile(fileURLToPath(new URL('./share-client.js', import.meta.url))));
 app.get('/api/session', (req, res) => {

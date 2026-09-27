@@ -15,7 +15,7 @@ test('temporary links are file-scoped, persistent, expiring, revocable, and owne
   const database=join(dir,'test.sqlite');const directory=join(dir,'uploads');
   const users=new Users(database);const files=new Files(database);
   await users.bootstrap('owner','owner-test-password');const member=await users.add('member','member-test-password');
-  const server=createApp(users,false,{files,directory}).listen(0,'127.0.0.1');await once(server,'listening');
+  const server=createApp(users,false,{files,directory,publicUrl:'https://cloud.example.test'}).listen(0,'127.0.0.1');await once(server,'listening');
   const base=`http://127.0.0.1:${server.address().port}`;
   const json=(path,method,body,cookie='')=>fetch(base+path,{method,headers:{cookie,'Content-Type':'application/json'},body:JSON.stringify(body)});
   const login=async(username,password)=>(await json('/api/login','POST',{username,password})).headers.get('set-cookie').split(';')[0];
@@ -37,11 +37,19 @@ test('temporary links are file-scoped, persistent, expiring, revocable, and owne
     assert.equal(stored,createHash('sha256').update(token).digest('hex'));assert.notEqual(stored,token);
     const reopened=new Files(database);assert.equal(reopened.resolveShare(token).id,file.id);reopened.close();
     const page=await fetch(base+share.path);assert.equal(page.status,200);assert.match(page.headers.get('x-robots-tag'),/noindex/);
+    const pageHtml=await page.text();assert.match(pageHtml,/property="og:title" content="private\.html"/);assert.match(pageHtml,/property="og:description" content="Temporary shared file/);
+    assert.match(pageHtml,new RegExp(`property="og:url" content="https://cloud\\.example\\.test${share.path}"`));assert.doesNotMatch(pageHtml,/property="og:image"/);
     const info=await (await fetch(base+share.path+'/info')).json();assert.equal(info.name,'private.html');assert.equal(info.kind,'text');
     assert.equal('storage_key' in info,false);assert.equal('userId' in info,false);
     const content=await fetch(base+share.path+'/content');assert.equal(content.status,200);assert.match(content.headers.get('content-type'),/^text\/plain/);assert.match(content.headers.get('content-security-policy'),/sandbox/);
     assert.equal(content.headers.get('cache-control'),'no-store');assert.equal(content.headers.get('referrer-policy'),'no-referrer');
     const download=await fetch(base+share.path+'/download');assert.match(download.headers.get('content-disposition'),/^attachment/);assert.equal(await download.text(),'<script>alert("not executed")</script>');
+    const image=await upload('preview.png',Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),Buffer.from('preview')]));
+    const imageShare=await (await json(`/api/files/${image.id}/shares`,'POST',{durationMinutes:60},cookie)).json();
+    const imagePage=await (await fetch(base+imageShare.path)).text();
+    assert.match(imagePage,new RegExp(`property="og:image" content="https://cloud\\.example\\.test${imageShare.path}/content"`));
+    assert.match(imagePage,/property="og:image:type" content="image\/png"/);assert.match(imagePage,/property="twitter:card" content="summary_large_image"/);
+    assert.equal((await fetch(base+imageShare.path+'/content')).headers.get('content-type'),'image/png');
     assert.equal((await fetch(base+`/api/files/${other.id}/download`)).status,401);
     const listed=await (await fetch(base+endpoint,{headers:{cookie}})).json();assert.equal(listed.links.length,1);assert.equal('token_hash' in listed.links[0],false);assert.equal('token' in listed.links[0],false);
     assert.equal((await json(`${endpoint}/${share.id}`,'DELETE',{},owner)).status,404);
