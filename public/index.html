@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>mClout — Your private cloud</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body class="loading">
+  <header><div class="header-left"><a class="brand" href="/">mClout<span class="brand-dot">.</span></a><nav id="workspace-nav" aria-label="Workspace" hidden><a id="files-link" href="#files">Files</a><a id="users-link" href="#users" hidden>Users</a></nav></div><span class="private"><span></span> Your private space</span></header>
+  <main>
+    <section id="login-panel" class="card">
+      <div class="cloud" aria-hidden="true">☁</div><p class="eyebrow">WELCOME HOME</p>
+      <h1>Your files.<br>Your space.</h1><p class="intro">A little cloud, all to yourself.<br>Sign in to your private workspace.</p>
+      <form id="login">
+        <label for="username">Username</label><input id="username" name="username" autocomplete="username" placeholder="Enter your username" required maxlength="256">
+        <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required maxlength="1024">
+        <p id="error" role="alert"></p><button id="submit" type="submit">Sign in →</button>
+      </form><p class="note">Only you. Only your cloud.</p>
+    </section>
+    <section id="home-panel" class="card" hidden><section id="files-panel" aria-labelledby="files-title"><div class="cloud" aria-hidden="true">☁</div><p class="eyebrow">YOUR WORKSPACE</p><h1 id="files-title">Your files.</h1><p class="intro">A private place for everything you want to keep.</p><form id="upload-form" class="upload-box"><label for="upload-files">Add files to your cloud</label><input id="upload-files" type="file" multiple required><p class="upload-hint">Choose one or more files · Up to 100 MB each</p><button id="upload-submit" type="submit">Upload files</button></form>
+      <p id="file-message" role="status" aria-live="polite"></p>
+      <div class="files-heading"><h2>Your library</h2><button id="refresh-files" class="text-button" type="button">Refresh</button></div>
+      <label class="search-label" for="file-search">Find a file</label><input id="file-search" type="search" placeholder="Search by filename" autocomplete="off">
+      <p id="file-summary" class="upload-hint"></p><div id="file-list"></div></section><section id="admin-panel" hidden aria-labelledby="admin-title">
+      <div class="section-heading"><h2 id="admin-title">Manage users</h2><span class="badge">Admin</span></div>
+      <p class="intro">Invite someone into your cloud by creating their account.</p>
+      <form id="add-user">
+        <label for="new-username">New username</label><input id="new-username" name="username" autocomplete="off" required maxlength="64" pattern="[a-zA-Z0-9_.@\-]+" placeholder="e.g. alex">
+        <label for="new-password">Password</label><input id="new-password" name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="1024" placeholder="At least 12 characters">
+        <label for="confirm-password">Confirm password</label><input id="confirm-password" name="confirm" type="password" autocomplete="new-password" required minlength="12" maxlength="1024" placeholder="Enter the password again">
+        <p id="user-message" role="status" aria-live="polite"></p><button id="add-user-submit" type="submit">Create user</button>
+      </form>
+      <h3>People with access</h3><ul id="user-list" class="user-list"></ul><p id="list-error" role="status"></p><button id="retry-users" type="button" class="secondary" hidden>Retry loading users</button>
+    </section><button id="logout" type="button">Sign out</button><p id="logout-error" role="alert"></p></section>
+  </main><footer>A quieter place for your digital life.</footer>
+<dialog id="file-dialog"><form id="file-action-form"><h2 id="file-dialog-title"></h2><p id="file-dialog-description"></p><label id="rename-label" for="rename-input">Filename</label><input id="rename-input" maxlength="255" required><div class="dialog-actions"><button type="button" id="cancel-file-action" class="secondary">Cancel</button><button id="confirm-file-action" type="submit">Save</button></div></form></dialog>
+</body></html>
