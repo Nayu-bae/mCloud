@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const databasePath = fileURLToPath(new URL('../data/mclout.sqlite', import.meta.url));
+export const databasePath = fileURLToPath(new URL('../data/mcloud.sqlite', import.meta.url));
 
 export function openDatabase(path = databasePath): DatabaseSync {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
