@@ -1,5 +1,7 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
+import { unlinkSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { shareRoutes } from './share-routes.js';
 import { fileRoutes } from './file-routes.js';
@@ -78,6 +80,26 @@ app.post('/api/admin/users', async (req, res, next) => {
     res.status(201).json({ user });
   } catch (error) {
     if (error instanceof UserInputError) { res.status(400).json({ error: error.message }); return; }
+    next(error);
+  }
+});
+app.delete('/api/admin/users/:id', (req, res, next) => {
+  try {
+    const admin = currentUser(req)!;
+    const id = Number(req.params.id);
+    if (id === admin.id) { res.status(400).json({ error: 'You cannot delete your own administrator account.' }); return; }
+    const storageKeys = users.remove(id);
+    let cleanupPending = false;
+    if (storage) {
+      for (const key of storageKeys) {
+        try { unlinkSync(join(storage.directory, key)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') cleanupPending = true; }
+      }
+    }
+    for (const [key, session] of sessions) if (session.userId === id) sessions.delete(key);
+    res.json({ success: true, cleanupPending });
+  } catch (error) {
+    if (error instanceof UserInputError) { res.status(error.status).json({ error: error.message }); return; }
     next(error);
   }
 });

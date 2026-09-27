@@ -26,7 +26,9 @@ async function verifyPassword(password: string, encoded: string): Promise<boolea
 
 export type Account = { id: number; username: string; role: 'admin' | 'user' };
 type UserRow = Account & { password_hash: string };
-export class UserInputError extends Error {}
+export class UserInputError extends Error {
+  constructor(message: string, public status = 400) { super(message); }
+}
 
 export class Users {
   private db: DatabaseSync;
@@ -74,6 +76,32 @@ export class Users {
     const user = this.db.prepare('SELECT id, username, role, password_hash FROM users WHERE username = ?').get(username) as UserRow | undefined;
     const valid = await verifyPassword(password, user?.password_hash || this.dummyHash);
     return user && valid ? { id: user.id, username: user.username, role: user.role } : null;
+  }
+
+  remove(id: number): string[] {
+    if (!Number.isSafeInteger(id) || id < 1) throw new UserInputError('User not found.', 404);
+    const account = this.get(id);
+    if (!account) throw new UserInputError('User not found.', 404);
+    if (account.role === 'admin') throw new UserInputError('The administrator account cannot be deleted.');
+    const uploads = this.db.prepare(`SELECT files.storage_key FROM files
+      JOIN user_files ON user_files.file_id = files.id WHERE user_files.user_id = ?`).all(id) as { storage_key: string }[];
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('DELETE FROM file_shares WHERE created_by = ?').run(id);
+      this.db.prepare('DELETE FROM files WHERE id IN (SELECT file_id FROM user_files WHERE user_id = ?)').run(id);
+      let removed = 1;
+      while (removed > 0) {
+        removed = Number(this.db.prepare(`DELETE FROM folders WHERE user_id = ? AND id NOT IN
+          (SELECT parent_id FROM folders WHERE parent_id IS NOT NULL)`).run(id).changes);
+      }
+      if (this.db.prepare('SELECT 1 FROM folders WHERE user_id = ?').get(id)) throw new Error('Could not remove the user folder hierarchy.');
+      this.db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      this.db.exec('COMMIT');
+      return uploads.map(upload => upload.storage_key);
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   backup(destination: string): void {

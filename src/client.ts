@@ -68,6 +68,13 @@ async function loadUsers() {
       role.className = 'badge';
       role.textContent = user.role === 'admin' ? 'Admin' : 'User';
       row.append(name, role);
+      if (user.role !== 'admin') {
+        const remove = document.createElement('button');
+        remove.type = 'button'; remove.className = 'text-button danger'; remove.textContent = 'Delete';
+        remove.setAttribute('aria-label', `Delete user ${user.username}`);
+        remove.addEventListener('click', () => void deleteUser(user, remove));
+        row.append(remove);
+      }
       userList.append(row);
     }
     listError.textContent = '';
@@ -76,6 +83,25 @@ async function loadUsers() {
     if (version !== sessionVersion) return;
     listError.textContent = 'Could not load users. Please try again.';
     retryUsers.hidden = false;
+  }
+}
+async function deleteUser(user: Account, button: HTMLButtonElement) {
+  if (!confirm(`Delete “${user.username}” and all of their uploaded files and folders? This cannot be undone.`)) return;
+  const version = sessionVersion;
+  button.disabled = true; button.textContent = 'Deleting…';
+  userMessage.classList.remove('success'); userMessage.textContent = '';
+  try {
+    const response = await fetch(`/api/admin/users/${user.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (version !== sessionVersion) return;
+    if (response.status === 401) { showSession(); error.textContent = 'Your session expired. Please sign in again.'; return; }
+    if (response.status === 403) { if (currentAccount) currentAccount.role = 'user'; usersLink.hidden = true; showView(); return; }
+    const result = await response.json();
+    if (!response.ok) { userMessage.textContent = result.error || 'Could not delete user.'; button.disabled = false; button.textContent = 'Delete'; return; }
+    userMessage.classList.add('success');
+    userMessage.textContent = `Deleted ${user.username} and all of their uploads.${result.cleanupPending ? ' Stored files will finish cleaning up after the server restarts.' : ''}`;
+    await loadUsers();
+  } catch {
+    if (version === sessionVersion) { userMessage.textContent = 'Cannot reach the server. Refresh the user list before trying again.'; button.disabled = false; button.textContent = 'Delete'; }
   }
 }
 retryUsers.addEventListener('click', () => void loadUsers());
@@ -131,12 +157,11 @@ document.querySelector('#logout')!.addEventListener('click', async () => {
 
 type PreviewKind = 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'unsupported';
 type LibraryFile = { id: number; name: string; size: number; createdAt: string; folderId: number | null; previewKind: PreviewKind };
-const fileList = document.querySelector<HTMLElement>('#file-list')!;
 const fileMessage = document.querySelector<HTMLElement>('#file-message')!;
-const fileSummary = document.querySelector<HTMLElement>('#file-summary')!;
-const fileSearch = document.querySelector<HTMLInputElement>('#file-search')!;
+const albumMessage = document.querySelector<HTMLElement>('#album-message')!;
 const uploadForm = document.querySelector<HTMLFormElement>('#upload-form')!;
 const uploadInput = document.querySelector<HTMLInputElement>('#upload-files')!;
+const uploadFolder = document.querySelector<HTMLSelectElement>('#upload-folder')!;
 const uploadButton = document.querySelector<HTMLButtonElement>('#upload-submit')!;
 type LibraryFolder = { id: number; name: string; parent_id: number | null };
 let folders: LibraryFolder[] = [];
@@ -161,7 +186,6 @@ function resetFiles() {
   document.querySelector<HTMLDialogElement>('#folder-dialog')?.close();
   folders = [];
   currentFolder = null;
-  document.querySelector('#folder-path')?.replaceChildren();
   uploadController?.abort();
   uploadController = undefined;
   listRequest++;
@@ -169,83 +193,33 @@ function resetFiles() {
   uploadForm.reset();
   uploadButton.disabled = false;
   uploadButton.textContent = 'Upload files';
-  fileSearch.value = '';
   fileMessage.textContent = '';
-  fileList.replaceChildren();
-  fileSummary.textContent = '';
+  document.querySelector('#stat-files')!.textContent = '0';
+  document.querySelector('#stat-folders')!.textContent = '0';
+  document.querySelector('#stat-storage')!.textContent = '0 B';
 }
 function sizeLabel(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+function setLibraryMessage(message: string) {
+  fileMessage.textContent = message;
+  albumMessage.textContent = message;
+}
 function renderFiles() {
   for (const id of selectedFiles) if (!library.some(file => file.id === id && file.folderId === currentFolder)) selectedFiles.delete(id);
   for (const id of selectedFolders) if (!folders.some(folder => folder.id === id && folder.parent_id === currentFolder)) selectedFolders.delete(id);
   updateSelectionControls();
-  fileList.replaceChildren();
-  renderFolderPath();
-  const currentFiles = library.filter(file => file.folderId === currentFolder);
-  const children = folders.filter(folder => folder.parent_id === currentFolder);
-  const visibleFolders = children.filter(folder => folder.name.toLowerCase().includes(fileSearch.value.toLowerCase()));
-  const filtered = currentFiles.filter(file => file.name.toLowerCase().includes(fileSearch.value.toLowerCase()));
-  for (const folder of visibleFolders) {
-    const row = document.createElement('article'); row.className = 'file-row folder-row';
-    const open = document.createElement('button'); open.type = 'button'; open.className = 'folder-open text-button';
-    open.textContent = `▱ ${folder.name}`; open.setAttribute('aria-label', `Open folder ${folder.name}`);
-    open.addEventListener('click', () => navigateFolder(folder.id));
-    const actions = document.createElement('div'); actions.className = 'file-actions';
-    for (const action of ['rename-folder', 'delete-folder'] as const) {
-      const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button';
-      button.textContent = action === 'rename-folder' ? 'Rename' : 'Delete';
-      button.setAttribute('aria-label', `${button.textContent} folder ${folder.name}`);
-      button.addEventListener('click', () => openFolderDialog(action, folder.id)); actions.append(button);
-    }
-    row.append(selectableItem('folder', folder.id, folder.name, open), actions); fileList.append(row);
+  document.querySelector('#stat-files')!.textContent = String(library.length);
+  document.querySelector('#stat-folders')!.textContent = String(folders.length);
+  document.querySelector('#stat-storage')!.textContent = sizeLabel(library.reduce((total, file) => total + file.size, 0));
+  const selectedUploadFolder = uploadFolder.value;
+  uploadFolder.replaceChildren(new Option('All files (root)', ''));
+  for (const folder of [...folders].sort((a, b) => folderTrail(a.id).map(item => item.name).join(' / ').localeCompare(folderTrail(b.id).map(item => item.name).join(' / ')))) {
+    uploadFolder.append(new Option(folderTrail(folder.id).map(item => item.name).join(' / '), String(folder.id)));
   }
-  fileSummary.textContent = `${children.length} folders · ${currentFiles.length} file${currentFiles.length === 1 ? '' : 's'} · ${sizeLabel(currentFiles.reduce((total, file) => total + file.size, 0))}`;
-  if (!filtered.length && !visibleFolders.length) {
-    const empty = document.createElement('p');
-    empty.className = 'empty';
-    empty.textContent = fileSearch.value ? 'No matching files or folders.' : 'This folder is empty. Upload files or create a folder above.';
-    fileList.append(empty);
-  }
-  for (const file of filtered) {
-    const row = document.createElement('article');
-    row.className = 'file-row';
-    const details = document.createElement('div');
-    details.className = 'file-details';
-    const name = document.createElement('strong');
-    name.textContent = file.name;
-    const meta = document.createElement('span');
-    meta.textContent = `${sizeLabel(file.size)} · ${new Date(file.createdAt).toLocaleDateString()}`;
-    details.append(name, meta);
-    const actions = document.createElement('div');
-    actions.className = 'file-actions';
-    const download = document.createElement('a');
-    download.href = `/api/files/${file.id}/download`;
-    download.textContent = 'Download';
-    download.setAttribute('aria-label', `Download ${file.name}`);
-    const rename = document.createElement('button');
-    rename.type = 'button'; rename.className = 'text-button'; rename.textContent = 'Rename';
-    rename.setAttribute('aria-label', `Rename ${file.name}`);
-    rename.addEventListener('click', () => openFileDialog(file, 'PATCH'));
-    const remove = document.createElement('button');
-    remove.type = 'button'; remove.className = 'text-button danger'; remove.textContent = 'Delete';
-    remove.setAttribute('aria-label', `Delete ${file.name}`);
-    remove.addEventListener('click', () => openFileDialog(file, 'DELETE'));
-    const move = document.createElement('button'); move.type = 'button'; move.className = 'text-button'; move.textContent = 'Move';
-    move.setAttribute('aria-label', `Move ${file.name}`);
-    move.addEventListener('click', () => openFolderDialog('move', file.id));
-    const open = document.createElement('button'); open.type = 'button'; open.className = 'text-button'; open.textContent = 'Open';
-    open.setAttribute('aria-label', `Open ${file.name}`);
-    open.addEventListener('click', () => openPreview(file, filtered));
-    const share = document.createElement('button'); share.type = 'button'; share.className = 'text-button'; share.textContent = 'Share link';
-    share.setAttribute('aria-label', `Share ${file.name}`); share.addEventListener('click', () => openShare(file));
-    actions.append(open, download, share, move, rename, remove);
-    row.append(selectableItem('file', file.id, file.name, details), actions);
-    fileList.append(row);
-  }
+  uploadFolder.value = folders.some(folder => String(folder.id) === selectedUploadFolder) ? selectedUploadFolder : '';
   renderAlbum();
 }
 async function loadFiles() {
@@ -258,13 +232,12 @@ async function loadFiles() {
     if (!response.ok) throw new Error();
     const result = await response.json();
     if (version !== sessionVersion || request !== listRequest) return;
-    document.querySelector('#album-message')!.textContent = '';
     library = result.files;
     folders = result.folders;
     if (currentFolder !== null && !folders.some(folder => folder.id === currentFolder)) currentFolder = null;
     maxUploadBytes = result.maxUploadBytes;
     renderFiles();
-  } catch { if (version === sessionVersion && request === listRequest) { fileMessage.textContent = 'Could not load files. Use Refresh to try again.'; document.querySelector('#album-message')!.textContent = fileMessage.textContent; } }
+  } catch { if (version === sessionVersion && request === listRequest) setLibraryMessage('Could not load files. Use Refresh to try again.'); }
 }
 async function changeFile(id: number, method: 'PATCH' | 'DELETE', body: object) {
   const version = sessionVersion;
@@ -272,10 +245,10 @@ async function changeFile(id: number, method: 'PATCH' | 'DELETE', body: object) 
     const response = await fetch(`/api/files/${id}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (version !== sessionVersion) return;
     if (response.status === 401) { showSession(); return; }
-    if (!response.ok) { fileMessage.textContent = (await response.json()).error; return; }
-    fileMessage.textContent = method === 'PATCH' ? ('folderId' in body ? 'File moved.' : 'File renamed.') : 'File deleted.';
+    if (!response.ok) { setLibraryMessage((await response.json()).error); return; }
+    setLibraryMessage(method === 'PATCH' ? ('folderId' in body ? 'File moved.' : 'File renamed.') : 'File deleted.');
     await loadFiles();
-  } catch { if (version === sessionVersion) fileMessage.textContent = 'Could not complete the change. Refresh your files before trying again.'; }
+  } catch { if (version === sessionVersion) setLibraryMessage('Could not complete the change. Refresh your files before trying again.'); }
 }
 uploadForm.addEventListener('submit', async event => {
   event.preventDefault();
@@ -283,7 +256,7 @@ uploadForm.addEventListener('submit', async event => {
   if (!selected.length) return;
   if (selected.some(file => file.size > maxUploadBytes)) { fileMessage.textContent = `Each file must be ${sizeLabel(maxUploadBytes)} or smaller.`; return; }
   const version = sessionVersion;
-  const uploadFolder = currentFolder;
+  const destinationFolder = uploadFolder.value ? Number(uploadFolder.value) : null;
   const controller = new AbortController();
   uploadController = controller;
   uploadButton.disabled = true;
@@ -293,7 +266,7 @@ uploadForm.addEventListener('submit', async event => {
     for (const file of selected) {
       if (version !== sessionVersion) return;
       fileMessage.textContent = `Uploading ${completed + 1} of ${selected.length}: ${file.name}`;
-      const response = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), 'X-Folder-Id': uploadFolder === null ? '' : String(uploadFolder) }, body: file, signal: controller.signal });
+      const response = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), 'X-Folder-Id': destinationFolder === null ? '' : String(destinationFolder) }, body: file, signal: controller.signal });
       if (version !== sessionVersion) return;
       if (response.status === 401) { showSession(); return; }
       if (!response.ok) throw new Error((await response.json()).error || 'Upload failed.');
@@ -312,9 +285,6 @@ uploadForm.addEventListener('submit', async event => {
     }
   }
 });
-fileSearch.addEventListener('input', () => { selectedFiles.clear(); selectedFolders.clear(); renderFiles(); });
-document.querySelector('#refresh-files')!.addEventListener('click', () => { fileMessage.textContent = ''; void loadFiles(); });
-
 const fileDialog = document.querySelector<HTMLDialogElement>('#file-dialog')!;
 const renameInput = document.querySelector<HTMLInputElement>('#rename-input')!;
 let pendingFileAction: { id: number; method: 'PATCH' | 'DELETE' } | undefined;
@@ -354,14 +324,9 @@ function folderTrail(id: number | null): LibraryFolder[] {
 function navigateFolder(id: number | null) {
   selectedFiles.clear(); selectedFolders.clear();
   currentFolder = id;
-  fileSearch.value = '';
   document.querySelector<HTMLInputElement>('#album-search')!.value = '';
-  fileMessage.textContent = '';
+  albumMessage.textContent = '';
   renderFiles();
-}
-function renderFolderPath() {
-  drawFolderPath(document.querySelector<HTMLElement>('#folder-path')!);
-  document.querySelector('label[for="upload-files"]')!.textContent = currentFolder === null ? 'Add files to your cloud' : `Upload to ${folderTrail(currentFolder).at(-1)?.name || 'this folder'}`;
 }
 function drawFolderPath(path: HTMLElement) {
   path.replaceChildren();
@@ -419,10 +384,10 @@ document.querySelector('#folder-action-form')!.addEventListener('submit', async 
     });
     if (version !== sessionVersion) return;
     if (response.status === 401) { showSession(); return; }
-    if (!response.ok) { fileMessage.textContent = (await response.json()).error; return; }
-    fileMessage.textContent = action === 'create' ? 'Folder created.' : action === 'delete-folder' ? 'Folder deleted.' : 'Folder renamed.';
+    if (!response.ok) { setLibraryMessage((await response.json()).error); return; }
+    setLibraryMessage(action === 'create' ? 'Folder created.' : action === 'delete-folder' ? 'Folder deleted.' : 'Folder renamed.');
     await loadFiles();
-  } catch { if (version === sessionVersion) fileMessage.textContent = 'Could not update the folder. Refresh and try again.'; }
+  } catch { if (version === sessionVersion) setLibraryMessage('Could not update the folder. Refresh and try again.'); }
 });
 
 
@@ -434,14 +399,39 @@ function renderAlbum() {
   const children = folders.filter(folder => folder.parent_id === currentFolder && folder.name.toLowerCase().includes(query));
   const visibleFiles = library.filter(file => file.folderId === currentFolder && file.name.toLowerCase().includes(query));
   for (const folder of children) {
+    const card = document.createElement('article'); card.className = 'album-card folder-card';
+    const heading = document.createElement('div'); heading.className = 'album-card-heading';
+    if (selectionMode) heading.append(selectionCheckbox('folder', folder.id, folder.name));
+    const kind = document.createElement('span'); kind.className = 'album-kind'; kind.textContent = '📁'; kind.setAttribute('aria-hidden', 'true');
+    const headingName = document.createElement('strong'); headingName.textContent = folder.name; headingName.title = folder.name;
+    heading.append(kind, headingName, albumMenu(
+      albumAction('Open', `Open folder ${folder.name}`, () => navigateFolder(folder.id)),
+      albumAction('Move', `Move folder ${folder.name}`, () => openBulk('move', { fileIds: [], folderIds: [folder.id] })),
+      albumAction('Rename', `Rename folder ${folder.name}`, () => openFolderDialog('rename-folder', folder.id)),
+      albumAction('Delete', `Delete folder ${folder.name}`, () => openFolderDialog('delete-folder', folder.id), true)
+    ));
     const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'album-tile folder-tile';
-    const icon = document.createElement('span'); icon.className = 'album-cover folder-cover'; icon.textContent = '▱'; icon.setAttribute('aria-hidden', 'true');
-    const name = document.createElement('strong'); name.textContent = folder.name;
-    const description = document.createElement('small'); description.textContent = 'Folder';
-    tile.append(icon, name, description); tile.setAttribute('aria-label', `Open folder ${folder.name}`);
-    tile.addEventListener('click', () => navigateFolder(folder.id)); grid.append(tile);
+    const icon = document.createElement('span'); icon.className = 'album-cover folder-cover'; icon.textContent = '📁'; icon.setAttribute('aria-hidden', 'true');
+    tile.append(icon); tile.setAttribute('aria-label', `Open folder ${folder.name}`);
+    const footer = document.createElement('div'); footer.className = 'album-card-footer'; footer.textContent = 'Folder';
+    tile.addEventListener('click', () => navigateFolder(folder.id)); card.append(heading, tile, footer); grid.append(card);
   }
   for (const file of visibleFiles) {
+    const card = document.createElement('article'); card.className = 'album-card';
+    const heading = document.createElement('div'); heading.className = 'album-card-heading';
+    if (selectionMode) heading.append(selectionCheckbox('file', file.id, file.name));
+    const kind = document.createElement('span'); kind.className = `album-kind ${file.previewKind}`;
+    kind.textContent = file.previewKind === 'pdf' ? 'PDF' : file.previewKind === 'image' ? '▧' : file.previewKind === 'video' ? '▶' : file.previewKind === 'audio' ? '♫' : file.previewKind === 'text' ? 'TXT' : 'FILE';
+    kind.setAttribute('aria-hidden', 'true');
+    const headingName = document.createElement('strong'); headingName.textContent = file.name; headingName.title = file.name;
+    heading.append(kind, headingName, albumMenu(
+      albumAction('Open', `Open ${file.name}`, () => openPreview(file, visibleFiles)),
+      albumDownload(file),
+      albumAction('Share link', `Create a temporary link for ${file.name}`, () => openShare(file)),
+      albumAction('Move', `Move ${file.name}`, () => openFolderDialog('move', file.id)),
+      albumAction('Rename', `Rename ${file.name}`, () => openFileDialog(file, 'PATCH')),
+      albumAction('Delete', `Delete ${file.name}`, () => openFileDialog(file, 'DELETE'), true)
+    ));
     const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'album-tile';
     const cover = document.createElement('span'); cover.className = 'album-cover';
     if (file.previewKind === 'image') {
@@ -451,17 +441,47 @@ function renderAlbum() {
       cover.classList.add('file-cover');
       cover.textContent = file.previewKind === 'pdf' ? 'PDF' : file.previewKind === 'video' ? '▶' : file.previewKind === 'audio' ? '♫' : file.previewKind === 'text' ? 'Aa' : 'File';
     }
-    const name = document.createElement('strong'); name.textContent = file.name;
-    const meta = document.createElement('small'); meta.textContent = sizeLabel(file.size);
-    tile.append(cover, name, meta); tile.setAttribute('aria-label', `Open ${file.name}`);
-    tile.addEventListener('click', () => openPreview(file, visibleFiles)); grid.append(tile);
+    tile.append(cover); tile.setAttribute('aria-label', `Open ${file.name}`);
+    const footer = document.createElement('div'); footer.className = 'album-card-footer'; footer.textContent = `${sizeLabel(file.size)} · ${new Date(file.createdAt).toLocaleDateString()}`;
+    tile.addEventListener('click', () => openPreview(file, visibleFiles)); card.append(heading, tile, footer); grid.append(card);
   }
   if (!children.length && !visibleFiles.length) {
     const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = query ? 'No matching files or folders.' : 'This folder is empty. Add files from the Files tab.'; grid.append(empty);
   }
 }
-document.querySelector('#album-search')!.addEventListener('input', renderAlbum);
-document.querySelector('#refresh-album')!.addEventListener('click', () => void loadFiles());
+function albumMenu(...items: (HTMLButtonElement | HTMLAnchorElement)[]): HTMLDetailsElement {
+  const details = document.createElement('details'); details.className = 'album-menu';
+  const summary = document.createElement('summary'); summary.textContent = '⋮'; summary.setAttribute('aria-label', 'More actions'); summary.title = 'More actions';
+  const menu = document.createElement('div'); menu.className = 'album-menu-items'; menu.append(...items);
+  details.append(summary, menu);
+  details.addEventListener('toggle', () => {
+    if (!details.open) return;
+    for (const other of document.querySelectorAll<HTMLDetailsElement>('.album-menu[open]')) if (other !== details) other.open = false;
+  });
+  return details;
+}
+function albumAction(label: string, accessibleLabel: string, action: () => void, danger = false): HTMLButtonElement {
+  const button = document.createElement('button'); button.type = 'button'; button.className = `album-action${danger ? ' danger' : ''}`;
+  button.textContent = label; button.setAttribute('aria-label', accessibleLabel); button.title = accessibleLabel;
+  button.addEventListener('click', () => { button.closest('details')?.removeAttribute('open'); action(); }); return button;
+}
+function albumDownload(file: LibraryFile): HTMLAnchorElement {
+  const link = document.createElement('a'); link.className = 'album-action'; link.href = `/api/files/${file.id}/download`;
+  link.textContent = 'Download'; link.setAttribute('aria-label', `Download ${file.name}`); link.title = `Download ${file.name}`;
+  link.addEventListener('click', () => link.closest('details')?.removeAttribute('open')); return link;
+}
+document.addEventListener('click', event => {
+  if (!(event.target instanceof Node)) return;
+  for (const menu of document.querySelectorAll<HTMLDetailsElement>('.album-menu[open]')) if (!menu.contains(event.target)) menu.open = false;
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') for (const menu of document.querySelectorAll<HTMLDetailsElement>('.album-menu[open]')) menu.open = false;
+});
+document.querySelector('#album-search')!.addEventListener('input', () => {
+  selectedFiles.clear(); selectedFolders.clear();
+  renderFiles();
+});
+document.querySelector('#refresh-album')!.addEventListener('click', () => { setLibraryMessage(''); void loadFiles(); });
 
 const previewDialog = document.querySelector<HTMLDialogElement>('#preview-dialog')!;
 const previewContent = document.querySelector<HTMLElement>('#preview-content')!;
@@ -552,21 +572,17 @@ function updateSelectionControls() {
   document.querySelector<HTMLButtonElement>('#bulk-move')!.disabled = !count;
   document.querySelector<HTMLButtonElement>('#bulk-delete')!.disabled = !count;
 }
-function selectableItem(kind: 'file' | 'folder', id: number, name: string, content: HTMLElement): HTMLElement {
-  const group = document.createElement('div'); group.className = 'selectable-item';
-  if (selectionMode) {
-    const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'item-checkbox';
-    checkbox.setAttribute('aria-label', `Select ${kind} ${name}`);
-    const selection = kind === 'file' ? selectedFiles : selectedFolders;
-    checkbox.checked = selection.has(id);
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked && selectedFiles.size + selectedFolders.size >= 100) { checkbox.checked = false; fileMessage.textContent = 'Select up to 100 items at a time.'; return; }
-      if (checkbox.checked) selection.add(id); else selection.delete(id);
-      updateSelectionControls();
-    });
-    group.append(checkbox);
-  }
-  group.append(content); return group;
+function selectionCheckbox(kind: 'file' | 'folder', id: number, name: string): HTMLInputElement {
+  const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'item-checkbox';
+  checkbox.setAttribute('aria-label', `Select ${kind} ${name}`); checkbox.title = `Select ${name}`;
+  const selection = kind === 'file' ? selectedFiles : selectedFolders;
+  checkbox.checked = selection.has(id);
+  checkbox.addEventListener('change', () => {
+    if (checkbox.checked && selectedFiles.size + selectedFolders.size >= 100) { checkbox.checked = false; setLibraryMessage('Select up to 100 items at a time.'); return; }
+    if (checkbox.checked) selection.add(id); else selection.delete(id);
+    updateSelectionControls();
+  });
+  return checkbox;
 }
 selectionToggle.addEventListener('click', () => {
   selectionMode = !selectionMode;
@@ -575,14 +591,14 @@ selectionToggle.addEventListener('click', () => {
 });
 document.querySelector('#select-all')!.addEventListener('click', () => {
   selectedFiles.clear(); selectedFolders.clear();
-  const query = fileSearch.value.toLowerCase();
+  const query = document.querySelector<HTMLInputElement>('#album-search')!.value.toLowerCase();
   for (const folder of folders.filter(item => item.parent_id === currentFolder && item.name.toLowerCase().includes(query))) {
     if (selectedFiles.size + selectedFolders.size < 100) selectedFolders.add(folder.id);
   }
   for (const file of library.filter(item => item.folderId === currentFolder && item.name.toLowerCase().includes(query))) {
     if (selectedFiles.size + selectedFolders.size < 100) selectedFiles.add(file.id);
   }
-  if (selectedFiles.size + selectedFolders.size === 100) fileMessage.textContent = 'Selected up to 100 visible items.';
+  if (selectedFiles.size + selectedFolders.size === 100) setLibraryMessage('Selected up to 100 visible items.');
   renderFiles();
 });
 let bulkBusy = false;
@@ -590,13 +606,16 @@ const bulkDialog = document.querySelector<HTMLDialogElement>('#bulk-dialog')!;
 const bulkDestination = document.querySelector<HTMLSelectElement>('#bulk-destination')!;
 const bulkConfirm = document.querySelector<HTMLButtonElement>('#bulk-confirm')!;
 const bulkError = document.querySelector<HTMLElement>('#bulk-error')!;
-let pendingBulk: { action: 'move' | 'delete'; fileIds: number[]; folderIds: number[] } | undefined;
-function openBulk(action: 'move' | 'delete') {
-  const count = selectedFiles.size + selectedFolders.size;
+type BulkItems = { fileIds: number[]; folderIds: number[] };
+let pendingBulk: ({ action: 'move' | 'delete' } & BulkItems) | undefined;
+function openBulk(action: 'move' | 'delete', items?: BulkItems) {
+  const fileIds = items?.fileIds ?? [...selectedFiles];
+  const folderIds = items?.folderIds ?? [...selectedFolders];
+  const count = fileIds.length + folderIds.length;
   if (!count) return;
-  pendingBulk = { action, fileIds: [...selectedFiles], folderIds: [...selectedFolders] };
+  pendingBulk = { action, fileIds, folderIds };
   const moving = action === 'move';
-  document.querySelector('#bulk-title')!.textContent = `${moving ? 'Move' : 'Delete'} ${count} items?`;
+  document.querySelector('#bulk-title')!.textContent = `${moving ? 'Move' : 'Delete'} ${count} item${count === 1 ? '' : 's'}?`;
   document.querySelector('#bulk-description')!.textContent = moving ? 'Folders move with all their contents. Choose a destination.' : 'Selected files will be permanently deleted. Every selected folder must already be empty. This cannot be undone.';
   bulkDestination.hidden = !moving; bulkDestination.disabled = !moving;
   document.querySelector<HTMLElement>('#bulk-destination-label')!.hidden = !moving;
@@ -605,11 +624,13 @@ function openBulk(action: 'move' | 'delete') {
   bulkConfirm.disabled = false;
   bulkConfirm.textContent = moving ? 'Move selected' : 'Delete permanently';
   if (moving) {
-    const choices = [{ id: null as number | null, name: 'All files (root)' }, ...folders.filter(folder => !folderTrail(folder.id).some(parent => selectedFolders.has(parent.id))).map(folder => ({ id: folder.id, name: folderTrail(folder.id).map(item => item.name).join(' / ') })).sort((a,b) => a.name.localeCompare(b.name))];
+    const movingFolders = new Set(folderIds);
+    const choices = [{ id: null as number | null, name: 'All files (root)' }, ...folders.filter(folder => !folderTrail(folder.id).some(parent => movingFolders.has(parent.id))).map(folder => ({ id: folder.id, name: folderTrail(folder.id).map(item => item.name).join(' / ') })).sort((a,b) => a.name.localeCompare(b.name))];
     for (const choice of choices) { const option = document.createElement('option'); option.value = choice.id === null ? '' : String(choice.id); option.textContent = choice.name; bulkDestination.append(option); }
     bulkDestination.value = currentFolder === null ? '' : String(currentFolder);
   } else {
-    const blocked = folders.filter(folder => selectedFolders.has(folder.id) && (folders.some(child => child.parent_id === folder.id) || library.some(file => file.folderId === folder.id)));
+    const deletingFolders = new Set(folderIds);
+    const blocked = folders.filter(folder => deletingFolders.has(folder.id) && (folders.some(child => child.parent_id === folder.id) || library.some(file => file.folderId === folder.id)));
     if (blocked.length) {
       bulkError.textContent = `Cannot delete non-empty folders: ${blocked.map(folder => folder.name).join(', ')}. Nothing will be deleted. Cancel and change the selection.`;
       bulkConfirm.disabled = true;
@@ -642,8 +663,8 @@ document.querySelector('#bulk-form')!.addEventListener('submit', async event => 
     if (!response.ok) { bulkError.textContent = result.error || 'The selection could not be updated.'; return; }
     bulkDialog.close();
     selectedFiles.clear(); selectedFolders.clear();
-    fileMessage.textContent = action.action === 'move' ? 'Selected items moved.' : 'Selected items deleted.';
-    if (result.cleanupPending) fileMessage.textContent += ' Some stored data will be cleaned up after the server restarts.';
+    setLibraryMessage(action.action === 'move' ? 'Selected items moved.' : 'Selected items deleted.');
+    if (result.cleanupPending) setLibraryMessage(`${fileMessage.textContent} Some stored data will be cleaned up after the server restarts.`);
     await loadFiles();
   } catch { if (version === sessionVersion) bulkError.textContent = 'Could not complete the request. Close this dialog and refresh before retrying.'; }
   finally {
