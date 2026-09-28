@@ -78,6 +78,32 @@ export class Users {
     return user && valid ? { id: user.id, username: user.username, role: user.role } : null;
   }
 
+  async update(id: number, currentPassword: unknown, username: unknown, newPassword: unknown): Promise<Account> {
+    const row = this.db.prepare('SELECT id, username, role, password_hash FROM users WHERE id = ?').get(id) as UserRow | undefined;
+    if (!row) throw new UserInputError('User not found.', 404);
+    if (typeof currentPassword !== 'string' || currentPassword.length > 1024 || !(await verifyPassword(currentPassword, row.password_hash))) {
+      throw new UserInputError('Current password is incorrect.');
+    }
+    if (typeof username !== 'string' || !/^[a-zA-Z0-9_.@-]{1,64}$/.test(username)) {
+      throw new UserInputError('Use 1–64 letters, numbers, dots, underscores, @ or hyphens for the username.');
+    }
+    const changePassword = newPassword !== undefined && newPassword !== '';
+    if (changePassword && (typeof newPassword !== 'string' || newPassword.length < 12 || newPassword.length > 1024)) {
+      throw new UserInputError('Use a password between 12 and 1024 characters.');
+    }
+    if (username === row.username && !changePassword) throw new UserInputError('Change the username or enter a new password.');
+    if (username !== row.username && this.db.prepare('SELECT 1 FROM users WHERE username = ? AND id != ?').get(username, id)) {
+      throw new UserInputError('That username already exists.');
+    }
+    const passwordHash = changePassword ? await hashPassword(newPassword as string) : row.password_hash;
+    try { this.db.prepare('UPDATE users SET username = ?, password_hash = ? WHERE id = ?').run(username, passwordHash, id); }
+    catch (error) {
+      if (error instanceof Error && /UNIQUE constraint failed/.test(error.message)) throw new UserInputError('That username already exists.');
+      throw error;
+    }
+    return this.get(id)!;
+  }
+
   remove(id: number): string[] {
     if (!Number.isSafeInteger(id) || id < 1) throw new UserInputError('User not found.', 404);
     const account = this.get(id);

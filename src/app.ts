@@ -66,6 +66,17 @@ app.post('/api/logout', (req, res) => {
   sessions.delete(token(req) || '');
   res.clearCookie('mcloud_session', cookieOptions).json({ authenticated: false });
 });
+app.patch('/api/account', async (req, res, next) => {
+  const account = currentUser(req);
+  if (!account) { res.status(401).json({ error: 'Please sign in.' }); return; }
+  try {
+    const user = await users.update(account.id, req.body?.currentPassword, req.body?.username, req.body?.newPassword);
+    res.json({ user });
+  } catch (error) {
+    if (error instanceof UserInputError) { res.status(error.status).json({ error: error.message }); return; }
+    next(error);
+  }
+});
 app.use('/api/admin', (req, res, next) => {
   const user = currentUser(req);
   if (!user) { res.status(401).json({ error: 'Please sign in.' }); return; }

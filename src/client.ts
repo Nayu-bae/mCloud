@@ -1,4 +1,15 @@
 const form = document.querySelector<HTMLFormElement>('#login')!;
+const themeToggle = document.querySelector<HTMLInputElement>('#theme-toggle')!;
+let savedTheme: string | null = null;
+try { savedTheme = localStorage.getItem('mcloud_theme'); } catch { /* Browser storage can be disabled. */ }
+const initialTheme = savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+document.documentElement.dataset.theme = initialTheme;
+themeToggle.checked = initialTheme === 'dark';
+themeToggle.addEventListener('change', () => {
+  const theme = themeToggle.checked ? 'dark' : 'light';
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('mcloud_theme', theme); } catch { /* The selected theme still applies for this page. */ }
+});
 const loginPanel = document.querySelector<HTMLElement>('#login-panel')!;
 const homePanel = document.querySelector<HTMLElement>('#home-panel')!;
 const error = document.querySelector<HTMLElement>('#error')!;
@@ -16,6 +27,15 @@ const filesLink = document.querySelector<HTMLAnchorElement>('#files-link')!;
 const albumPanel = document.querySelector<HTMLElement>('#album-panel')!;
 const albumLink = document.querySelector<HTMLAnchorElement>('#album-link')!;
 const usersLink = document.querySelector<HTMLAnchorElement>('#users-link')!;
+const profileMenu = document.querySelector<HTMLDetailsElement>('#profile-menu')!;
+const profileName = document.querySelector<HTMLElement>('#profile-name')!;
+const settingsDialog = document.querySelector<HTMLDialogElement>('#settings-dialog')!;
+const settingsForm = document.querySelector<HTMLFormElement>('#settings-form')!;
+const settingsUsername = document.querySelector<HTMLInputElement>('#settings-username')!;
+const settingsCurrentPassword = document.querySelector<HTMLInputElement>('#settings-current-password')!;
+const settingsNewPassword = document.querySelector<HTMLInputElement>('#settings-new-password')!;
+const settingsConfirmPassword = document.querySelector<HTMLInputElement>('#settings-confirm-password')!;
+const settingsMessage = document.querySelector<HTMLElement>('#settings-message')!;
 let currentAccount: Account | undefined;
 function showView() {
   const usersView = currentAccount?.role === 'admin' && location.hash === '#users';
@@ -37,6 +57,9 @@ const showSession = (user?: Account) => {
   currentAccount = user;
   nav.hidden = !user;
   usersLink.hidden = user?.role !== 'admin';
+  profileName.textContent = user?.username || '';
+  profileMenu.open = false;
+  if (!user && settingsDialog.open) settingsDialog.close();
   if (!user) history.replaceState(null, '', location.pathname);
   showView();
   userForm.reset();
@@ -152,6 +175,37 @@ document.querySelector('#logout')!.addEventListener('click', async () => {
     if (!response.ok) throw new Error();
     showSession();
   } catch { document.querySelector('#logout-error')!.textContent = 'Could not sign out. Please try again.'; }
+});
+document.querySelector('#open-settings')!.addEventListener('click', () => {
+  if (!currentAccount) return;
+  profileMenu.open = false;
+  settingsForm.reset(); settingsUsername.value = currentAccount.username; settingsMessage.textContent = ''; settingsMessage.classList.remove('success');
+  settingsDialog.showModal(); settingsUsername.focus();
+});
+document.querySelector('#close-settings')!.addEventListener('click', () => settingsDialog.close());
+settingsForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!currentAccount) return;
+  settingsMessage.textContent = ''; settingsMessage.classList.remove('success');
+  if (settingsNewPassword.value !== settingsConfirmPassword.value) { settingsMessage.textContent = 'New passwords do not match.'; return; }
+  const button = document.querySelector<HTMLButtonElement>('#save-settings')!;
+  const version = sessionVersion;
+  button.disabled = true; button.textContent = 'Saving…';
+  try {
+    const response = await fetch('/api/account', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: settingsUsername.value, currentPassword: settingsCurrentPassword.value, newPassword: settingsNewPassword.value }) });
+    if (version !== sessionVersion) return;
+    if (response.status === 401) { settingsDialog.close(); showSession(); error.textContent = 'Your session expired. Please sign in again.'; return; }
+    const result = await response.json();
+    if (!response.ok) { settingsMessage.textContent = result.error || 'Could not update your account.'; return; }
+    currentAccount = result.user; profileName.textContent = result.user.username; settingsUsername.value = result.user.username;
+    settingsCurrentPassword.value = ''; settingsNewPassword.value = ''; settingsConfirmPassword.value = '';
+    settingsMessage.classList.add('success'); settingsMessage.textContent = 'Account settings updated.';
+    if (result.user.role === 'admin') await loadUsers();
+  } catch { if (version === sessionVersion) settingsMessage.textContent = 'Cannot reach the server. Please try again.'; }
+  finally { if (version === sessionVersion) { button.disabled = false; button.textContent = 'Save changes'; } }
+});
+document.addEventListener('click', event => {
+  if (event.target instanceof Node && profileMenu.open && !profileMenu.contains(event.target)) profileMenu.open = false;
 });
 
 
