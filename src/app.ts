@@ -42,6 +42,8 @@ if (storage) {
   app.use('/s', shareRoutes(storage.files, storage.directory, storage.publicUrl));
 }
 app.get('/share.js', (_req, res) => res.sendFile(fileURLToPath(new URL('./share-client.js', import.meta.url))));
+app.get('/theme.js', (_req, res) => res.sendFile(fileURLToPath(new URL('./theme.js', import.meta.url))));
+app.get('/lucide.js', (_req, res) => res.sendFile(fileURLToPath(new URL('../node_modules/lucide/dist/umd/lucide.min.js', import.meta.url))));
 app.get('/api/session', (req, res) => {
   const user = currentUser(req);
   res.status(user ? 200 : 401).json({ authenticated: Boolean(user), user });

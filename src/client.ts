@@ -1,15 +1,14 @@
 const form = document.querySelector<HTMLFormElement>('#login')!;
-const themeToggle = document.querySelector<HTMLInputElement>('#theme-toggle')!;
-let savedTheme: string | null = null;
-try { savedTheme = localStorage.getItem('mcloud_theme'); } catch { /* Browser storage can be disabled. */ }
-const initialTheme = savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-document.documentElement.dataset.theme = initialTheme;
-themeToggle.checked = initialTheme === 'dark';
-themeToggle.addEventListener('change', () => {
-  const theme = themeToggle.checked ? 'dark' : 'light';
-  document.documentElement.dataset.theme = theme;
-  try { localStorage.setItem('mcloud_theme', theme); } catch { /* The selected theme still applies for this page. */ }
-});
+type LucideBrowser = { createIcons: (options?: { attrs?: Record<string, string> }) => void };
+const lucideBrowser = () => (window as unknown as { lucide?: LucideBrowser }).lucide;
+function refreshIcons() { lucideBrowser()?.createIcons({ attrs: { 'stroke-width': '2' } }); }
+function icon(name: string): HTMLElement {
+  const element = document.createElement('i'); element.setAttribute('data-lucide', name); element.setAttribute('aria-hidden', 'true'); return element;
+}
+function setButton(button: HTMLButtonElement, label: string, iconName?: string) {
+  button.replaceChildren(...(iconName ? [icon(iconName), document.createTextNode(label)] : [document.createTextNode(label)]));
+  refreshIcons();
+}
 const loginPanel = document.querySelector<HTMLElement>('#login-panel')!;
 const homePanel = document.querySelector<HTMLElement>('#home-panel')!;
 const error = document.querySelector<HTMLElement>('#error')!;
@@ -93,13 +92,14 @@ async function loadUsers() {
       row.append(name, role);
       if (user.role !== 'admin') {
         const remove = document.createElement('button');
-        remove.type = 'button'; remove.className = 'text-button danger'; remove.textContent = 'Delete';
+        remove.type = 'button'; remove.className = 'text-button danger'; remove.append(icon('trash-2'), 'Delete');
         remove.setAttribute('aria-label', `Delete user ${user.username}`);
         remove.addEventListener('click', () => void deleteUser(user, remove));
         row.append(remove);
       }
       userList.append(row);
     }
+    refreshIcons();
     listError.textContent = '';
     retryUsers.hidden = true;
   } catch {
@@ -111,7 +111,7 @@ async function loadUsers() {
 async function deleteUser(user: Account, button: HTMLButtonElement) {
   if (!confirm(`Delete “${user.username}” and all of their uploaded files and folders? This cannot be undone.`)) return;
   const version = sessionVersion;
-  button.disabled = true; button.textContent = 'Deleting…';
+  button.disabled = true; setButton(button, 'Deleting…', 'loader-circle');
   userMessage.classList.remove('success'); userMessage.textContent = '';
   try {
     const response = await fetch(`/api/admin/users/${user.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: '{}' });
@@ -119,12 +119,12 @@ async function deleteUser(user: Account, button: HTMLButtonElement) {
     if (response.status === 401) { showSession(); error.textContent = 'Your session expired. Please sign in again.'; return; }
     if (response.status === 403) { if (currentAccount) currentAccount.role = 'user'; usersLink.hidden = true; showView(); return; }
     const result = await response.json();
-    if (!response.ok) { userMessage.textContent = result.error || 'Could not delete user.'; button.disabled = false; button.textContent = 'Delete'; return; }
+    if (!response.ok) { userMessage.textContent = result.error || 'Could not delete user.'; button.disabled = false; setButton(button, 'Delete', 'trash-2'); return; }
     userMessage.classList.add('success');
     userMessage.textContent = `Deleted ${user.username} and all of their uploads.${result.cleanupPending ? ' Stored files will finish cleaning up after the server restarts.' : ''}`;
     await loadUsers();
   } catch {
-    if (version === sessionVersion) { userMessage.textContent = 'Cannot reach the server. Refresh the user list before trying again.'; button.disabled = false; button.textContent = 'Delete'; }
+    if (version === sessionVersion) { userMessage.textContent = 'Cannot reach the server. Refresh the user list before trying again.'; button.disabled = false; setButton(button, 'Delete', 'trash-2'); }
   }
 }
 retryUsers.addEventListener('click', () => void loadUsers());
@@ -136,7 +136,7 @@ userForm.addEventListener('submit', async event => {
   if (data.get('password') !== data.get('confirm')) { userMessage.textContent = 'Passwords do not match.'; return; }
   const button = document.querySelector<HTMLButtonElement>('#add-user-submit')!;
   button.disabled = true;
-  button.textContent = 'Creating…';
+  setButton(button, 'Creating…', 'loader-circle');
   userMessage.textContent = '';
   const version = sessionVersion;
   try {
@@ -152,13 +152,13 @@ userForm.addEventListener('submit', async event => {
     userMessage.textContent = `Account created for ${result.user.username}. They can now sign in.`;
     await loadUsers();
   } catch { if (version === sessionVersion) userMessage.textContent = 'Cannot reach the server. Check the user list before trying again.'; }
-  finally { button.disabled = false; button.textContent = 'Create user'; }
+  finally { button.disabled = false; setButton(button, 'Create user', 'user-plus'); }
 });
 form.addEventListener('submit', async event => {
   event.preventDefault();
   error.textContent = '';
   submit.disabled = true;
-  submit.textContent = 'Signing in…';
+  setButton(submit, 'Signing in…', 'loader-circle');
   try {
     const data = new FormData(form);
     const response = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: data.get('username'), password: data.get('password') }) });
@@ -167,7 +167,7 @@ form.addEventListener('submit', async event => {
     form.reset();
     showSession(result.user);
   } catch { error.textContent = 'Cannot reach the server. Please try again.'; }
-  finally { submit.disabled = false; submit.textContent = 'Sign in →'; }
+  finally { submit.disabled = false; setButton(submit, 'Sign in', 'log-in'); }
 });
 document.querySelector('#logout')!.addEventListener('click', async () => {
   try {
@@ -190,7 +190,7 @@ settingsForm.addEventListener('submit', async event => {
   if (settingsNewPassword.value !== settingsConfirmPassword.value) { settingsMessage.textContent = 'New passwords do not match.'; return; }
   const button = document.querySelector<HTMLButtonElement>('#save-settings')!;
   const version = sessionVersion;
-  button.disabled = true; button.textContent = 'Saving…';
+  button.disabled = true; setButton(button, 'Saving…', 'loader-circle');
   try {
     const response = await fetch('/api/account', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: settingsUsername.value, currentPassword: settingsCurrentPassword.value, newPassword: settingsNewPassword.value }) });
     if (version !== sessionVersion) return;
@@ -202,7 +202,7 @@ settingsForm.addEventListener('submit', async event => {
     settingsMessage.classList.add('success'); settingsMessage.textContent = 'Account settings updated.';
     if (result.user.role === 'admin') await loadUsers();
   } catch { if (version === sessionVersion) settingsMessage.textContent = 'Cannot reach the server. Please try again.'; }
-  finally { if (version === sessionVersion) { button.disabled = false; button.textContent = 'Save changes'; } }
+  finally { if (version === sessionVersion) { button.disabled = false; setButton(button, 'Save changes', 'save'); } }
 });
 document.addEventListener('click', event => {
   if (event.target instanceof Node && profileMenu.open && !profileMenu.contains(event.target)) profileMenu.open = false;
@@ -217,6 +217,10 @@ const uploadForm = document.querySelector<HTMLFormElement>('#upload-form')!;
 const uploadInput = document.querySelector<HTMLInputElement>('#upload-files')!;
 const uploadFolder = document.querySelector<HTMLSelectElement>('#upload-folder')!;
 const uploadButton = document.querySelector<HTMLButtonElement>('#upload-submit')!;
+const chooseFiles = document.querySelector<HTMLButtonElement>('#choose-files')!;
+const uploadSelection = document.querySelector<HTMLElement>('#upload-selection')!;
+let stagedFiles: File[] = [];
+let dragDepth = 0;
 type LibraryFolder = { id: number; name: string; parent_id: number | null };
 let folders: LibraryFolder[] = [];
 let currentFolder: number | null = null;
@@ -245,8 +249,10 @@ function resetFiles() {
   listRequest++;
   library = [];
   uploadForm.reset();
+  stagedFiles = []; dragDepth = 0; uploadForm.classList.remove('drag-active');
+  uploadSelection.textContent = 'No files selected · Up to 100 MB each';
   uploadButton.disabled = false;
-  uploadButton.textContent = 'Upload files';
+  setButton(uploadButton, 'Upload files', 'cloud-upload');
   fileMessage.textContent = '';
   document.querySelector('#stat-files')!.textContent = '0';
   document.querySelector('#stat-folders')!.textContent = '0';
@@ -304,9 +310,36 @@ async function changeFile(id: number, method: 'PATCH' | 'DELETE', body: object) 
     await loadFiles();
   } catch { if (version === sessionVersion) setLibraryMessage('Could not complete the change. Refresh your files before trying again.'); }
 }
+function updateUploadSelection() {
+  const total = stagedFiles.reduce((bytes, file) => bytes + file.size, 0);
+  uploadSelection.textContent = stagedFiles.length ? `${stagedFiles.length} file${stagedFiles.length === 1 ? '' : 's'} selected · ${sizeLabel(total)} total` : 'No files selected · Up to 100 MB each';
+}
+chooseFiles.addEventListener('click', () => uploadInput.click());
+uploadInput.addEventListener('change', () => { stagedFiles = Array.from(uploadInput.files || []); updateUploadSelection(); });
+uploadForm.addEventListener('dragenter', event => {
+  if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+  event.preventDefault(); dragDepth++; uploadForm.classList.add('drag-active');
+});
+uploadForm.addEventListener('dragover', event => {
+  if (!Array.from(event.dataTransfer?.types || []).includes('Files')) return;
+  event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; uploadForm.classList.add('drag-active');
+});
+uploadForm.addEventListener('dragleave', event => {
+  event.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) uploadForm.classList.remove('drag-active');
+});
+uploadForm.addEventListener('drop', event => {
+  event.preventDefault(); dragDepth = 0; uploadForm.classList.remove('drag-active');
+  if (uploadButton.disabled) return;
+  const files = Array.from(event.dataTransfer?.files || []);
+  if (!files.length) { setLibraryMessage('Drop one or more files to upload.'); return; }
+  stagedFiles = files;
+  try { if (event.dataTransfer) uploadInput.files = event.dataTransfer.files; } catch { /* The staged files are still ready to upload. */ }
+  updateUploadSelection(); setLibraryMessage(`${files.length} file${files.length === 1 ? '' : 's'} ready to upload.`);
+});
 uploadForm.addEventListener('submit', async event => {
   event.preventDefault();
-  const selected = Array.from(uploadInput.files || []);
+  const selected = [...stagedFiles];
   if (!selected.length) return;
   if (selected.some(file => file.size > maxUploadBytes)) { fileMessage.textContent = `Each file must be ${sizeLabel(maxUploadBytes)} or smaller.`; return; }
   const version = sessionVersion;
@@ -314,7 +347,7 @@ uploadForm.addEventListener('submit', async event => {
   const controller = new AbortController();
   uploadController = controller;
   uploadButton.disabled = true;
-  uploadButton.textContent = 'Uploading…';
+  setButton(uploadButton, 'Uploading…', 'loader-circle');
   let completed = 0;
   try {
     for (const file of selected) {
@@ -327,6 +360,7 @@ uploadForm.addEventListener('submit', async event => {
       completed++;
     }
     uploadForm.reset();
+    stagedFiles = []; updateUploadSelection();
     fileMessage.textContent = `${completed} file${completed === 1 ? '' : 's'} uploaded.`;
   } catch (error) {
     if (version === sessionVersion) fileMessage.textContent = `${completed} uploaded. ${error instanceof Error ? error.message : 'Upload failed.'} Refresh before retrying to avoid duplicates.`;
@@ -334,7 +368,7 @@ uploadForm.addEventListener('submit', async event => {
     if (version === sessionVersion) {
       uploadController = undefined;
       uploadButton.disabled = false;
-      uploadButton.textContent = 'Upload files';
+      setButton(uploadButton, 'Upload files', 'cloud-upload');
       await loadFiles();
     }
   }
@@ -351,7 +385,7 @@ function openFileDialog(file: LibraryFile, method: 'PATCH' | 'DELETE') {
   renameInput.hidden = deleting;
   renameInput.disabled = deleting;
   renameInput.value = file.name;
-  document.querySelector('#confirm-file-action')!.textContent = deleting ? 'Delete permanently' : 'Save name';
+  setButton(document.querySelector<HTMLButtonElement>('#confirm-file-action')!, deleting ? 'Delete permanently' : 'Save name', deleting ? 'trash-2' : 'save');
   fileDialog.showModal();
 }
 document.querySelector('#cancel-file-action')!.addEventListener('click', () => fileDialog.close());
@@ -418,7 +452,7 @@ function openFolderDialog(action: FolderAction, id?: number) {
     for (const choice of choices) { const option = document.createElement('option'); option.value = choice.id === null ? '' : String(choice.id); option.textContent = choice.name; moveDestination.append(option); }
     moveDestination.value = currentFolder === null ? '' : String(currentFolder);
   }
-  document.querySelector('#confirm-folder-action')!.textContent = moving ? 'Move file' : deleting ? 'Delete empty folder' : action === 'create' ? 'Create folder' : 'Save name';
+  setButton(document.querySelector<HTMLButtonElement>('#confirm-folder-action')!, moving ? 'Move file' : deleting ? 'Delete empty folder' : action === 'create' ? 'Create folder' : 'Save name', moving ? 'folder-input' : deleting ? 'trash-2' : action === 'create' ? 'folder-plus' : 'save');
   folderDialog.showModal();
 }
 document.querySelector('#new-folder')!.addEventListener('click', () => openFolderDialog('create'));
@@ -456,17 +490,17 @@ function renderAlbum() {
     const card = document.createElement('article'); card.className = 'album-card folder-card';
     const heading = document.createElement('div'); heading.className = 'album-card-heading';
     if (selectionMode) heading.append(selectionCheckbox('folder', folder.id, folder.name));
-    const kind = document.createElement('span'); kind.className = 'album-kind'; kind.textContent = '📁'; kind.setAttribute('aria-hidden', 'true');
+    const kind = document.createElement('span'); kind.className = 'album-kind'; kind.append(icon('folder')); kind.setAttribute('aria-hidden', 'true');
     const headingName = document.createElement('strong'); headingName.textContent = folder.name; headingName.title = folder.name;
     heading.append(kind, headingName, albumMenu(
-      albumAction('Open', `Open folder ${folder.name}`, () => navigateFolder(folder.id)),
-      albumAction('Move', `Move folder ${folder.name}`, () => openBulk('move', { fileIds: [], folderIds: [folder.id] })),
-      albumAction('Rename', `Rename folder ${folder.name}`, () => openFolderDialog('rename-folder', folder.id)),
-      albumAction('Delete', `Delete folder ${folder.name}`, () => openFolderDialog('delete-folder', folder.id), true)
+      albumAction('Open', 'folder-open', `Open folder ${folder.name}`, () => navigateFolder(folder.id)),
+      albumAction('Move', 'folder-input', `Move folder ${folder.name}`, () => openBulk('move', { fileIds: [], folderIds: [folder.id] })),
+      albumAction('Rename', 'pencil', `Rename folder ${folder.name}`, () => openFolderDialog('rename-folder', folder.id)),
+      albumAction('Delete', 'trash-2', `Delete folder ${folder.name}`, () => openFolderDialog('delete-folder', folder.id), true)
     ));
     const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'album-tile folder-tile';
-    const icon = document.createElement('span'); icon.className = 'album-cover folder-cover'; icon.textContent = '📁'; icon.setAttribute('aria-hidden', 'true');
-    tile.append(icon); tile.setAttribute('aria-label', `Open folder ${folder.name}`);
+    const coverIcon = document.createElement('span'); coverIcon.className = 'album-cover folder-cover'; coverIcon.append(icon('folder')); coverIcon.setAttribute('aria-hidden', 'true');
+    tile.append(coverIcon); tile.setAttribute('aria-label', `Open folder ${folder.name}`);
     const footer = document.createElement('div'); footer.className = 'album-card-footer'; footer.textContent = 'Folder';
     tile.addEventListener('click', () => navigateFolder(folder.id)); card.append(heading, tile, footer); grid.append(card);
   }
@@ -475,16 +509,16 @@ function renderAlbum() {
     const heading = document.createElement('div'); heading.className = 'album-card-heading';
     if (selectionMode) heading.append(selectionCheckbox('file', file.id, file.name));
     const kind = document.createElement('span'); kind.className = `album-kind ${file.previewKind}`;
-    kind.textContent = file.previewKind === 'pdf' ? 'PDF' : file.previewKind === 'image' ? '▧' : file.previewKind === 'video' ? '▶' : file.previewKind === 'audio' ? '♫' : file.previewKind === 'text' ? 'TXT' : 'FILE';
+    kind.append(icon(file.previewKind === 'image' ? 'image' : file.previewKind === 'video' ? 'file-video' : file.previewKind === 'audio' ? 'file-audio' : file.previewKind === 'text' || file.previewKind === 'pdf' ? 'file-text' : 'file'));
     kind.setAttribute('aria-hidden', 'true');
     const headingName = document.createElement('strong'); headingName.textContent = file.name; headingName.title = file.name;
     heading.append(kind, headingName, albumMenu(
-      albumAction('Open', `Open ${file.name}`, () => openPreview(file, visibleFiles)),
+      albumAction('Open', 'eye', `Open ${file.name}`, () => openPreview(file, visibleFiles)),
       albumDownload(file),
-      albumAction('Share link', `Create a temporary link for ${file.name}`, () => openShare(file)),
-      albumAction('Move', `Move ${file.name}`, () => openFolderDialog('move', file.id)),
-      albumAction('Rename', `Rename ${file.name}`, () => openFileDialog(file, 'PATCH')),
-      albumAction('Delete', `Delete ${file.name}`, () => openFileDialog(file, 'DELETE'), true)
+      albumAction('Share link', 'link-2', `Create a temporary link for ${file.name}`, () => openShare(file)),
+      albumAction('Move', 'folder-input', `Move ${file.name}`, () => openFolderDialog('move', file.id)),
+      albumAction('Rename', 'pencil', `Rename ${file.name}`, () => openFileDialog(file, 'PATCH')),
+      albumAction('Delete', 'trash-2', `Delete ${file.name}`, () => openFileDialog(file, 'DELETE'), true)
     ));
     const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'album-tile';
     const cover = document.createElement('span'); cover.className = 'album-cover';
@@ -493,7 +527,7 @@ function renderAlbum() {
       image.addEventListener('error', () => { cover.textContent = 'Image preview unavailable'; }); cover.append(image);
     } else {
       cover.classList.add('file-cover');
-      cover.textContent = file.previewKind === 'pdf' ? 'PDF' : file.previewKind === 'video' ? '▶' : file.previewKind === 'audio' ? '♫' : file.previewKind === 'text' ? 'Aa' : 'File';
+      cover.append(icon(file.previewKind === 'pdf' || file.previewKind === 'text' ? 'file-text' : file.previewKind === 'video' ? 'file-video' : file.previewKind === 'audio' ? 'file-audio' : 'file'));
     }
     tile.append(cover); tile.setAttribute('aria-label', `Open ${file.name}`);
     const footer = document.createElement('div'); footer.className = 'album-card-footer'; footer.textContent = `${sizeLabel(file.size)} · ${new Date(file.createdAt).toLocaleDateString()}`;
@@ -502,10 +536,11 @@ function renderAlbum() {
   if (!children.length && !visibleFiles.length) {
     const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = query ? 'No matching files or folders.' : 'This folder is empty. Add files from the Files tab.'; grid.append(empty);
   }
+  refreshIcons();
 }
 function albumMenu(...items: (HTMLButtonElement | HTMLAnchorElement)[]): HTMLDetailsElement {
   const details = document.createElement('details'); details.className = 'album-menu';
-  const summary = document.createElement('summary'); summary.textContent = '⋮'; summary.setAttribute('aria-label', 'More actions'); summary.title = 'More actions';
+  const summary = document.createElement('summary'); summary.append(icon('more-vertical')); summary.setAttribute('aria-label', 'More actions'); summary.title = 'More actions';
   const menu = document.createElement('div'); menu.className = 'album-menu-items'; menu.append(...items);
   details.append(summary, menu);
   details.addEventListener('toggle', () => {
@@ -514,14 +549,14 @@ function albumMenu(...items: (HTMLButtonElement | HTMLAnchorElement)[]): HTMLDet
   });
   return details;
 }
-function albumAction(label: string, accessibleLabel: string, action: () => void, danger = false): HTMLButtonElement {
+function albumAction(label: string, iconName: string, accessibleLabel: string, action: () => void, danger = false): HTMLButtonElement {
   const button = document.createElement('button'); button.type = 'button'; button.className = `album-action${danger ? ' danger' : ''}`;
-  button.textContent = label; button.setAttribute('aria-label', accessibleLabel); button.title = accessibleLabel;
+  button.append(icon(iconName), label); button.setAttribute('aria-label', accessibleLabel); button.title = accessibleLabel;
   button.addEventListener('click', () => { button.closest('details')?.removeAttribute('open'); action(); }); return button;
 }
 function albumDownload(file: LibraryFile): HTMLAnchorElement {
   const link = document.createElement('a'); link.className = 'album-action'; link.href = `/api/files/${file.id}/download`;
-  link.textContent = 'Download'; link.setAttribute('aria-label', `Download ${file.name}`); link.title = `Download ${file.name}`;
+  link.append(icon('download'), 'Download'); link.setAttribute('aria-label', `Download ${file.name}`); link.title = `Download ${file.name}`;
   link.addEventListener('click', () => link.closest('details')?.removeAttribute('open')); return link;
 }
 document.addEventListener('click', event => {
@@ -619,7 +654,7 @@ const selectedFolders = new Set<number>();
 const selectionToggle = document.querySelector<HTMLButtonElement>('#select-multiple')!;
 function updateSelectionControls() {
   const count = selectedFiles.size + selectedFolders.size;
-  selectionToggle.textContent = selectionMode ? 'Cancel selection' : 'Select multiple';
+  setButton(selectionToggle, selectionMode ? 'Cancel selection' : 'Select multiple', selectionMode ? 'x' : 'list-checks');
   selectionToggle.setAttribute('aria-pressed', String(selectionMode));
   document.querySelector<HTMLElement>('#selection-toolbar')!.hidden = !selectionMode;
   document.querySelector('#selection-count')!.textContent = `${count} selected`;
@@ -676,7 +711,7 @@ function openBulk(action: 'move' | 'delete', items?: BulkItems) {
   bulkDestination.replaceChildren();
   bulkError.textContent = '';
   bulkConfirm.disabled = false;
-  bulkConfirm.textContent = moving ? 'Move selected' : 'Delete permanently';
+  setButton(bulkConfirm, moving ? 'Move selected' : 'Delete permanently', moving ? 'folder-input' : 'trash-2');
   if (moving) {
     const movingFolders = new Set(folderIds);
     const choices = [{ id: null as number | null, name: 'All files (root)' }, ...folders.filter(folder => !folderTrail(folder.id).some(parent => movingFolders.has(parent.id))).map(folder => ({ id: folder.id, name: folderTrail(folder.id).map(item => item.name).join(' / ') })).sort((a,b) => a.name.localeCompare(b.name))];
@@ -703,7 +738,7 @@ document.querySelector('#bulk-form')!.addEventListener('submit', async event => 
   bulkBusy = true;
   const version = sessionVersion;
   bulkConfirm.disabled = true;
-  bulkConfirm.textContent = 'Working…';
+  setButton(bulkConfirm, 'Working…', 'loader-circle');
   bulkError.textContent = '';
   try {
     const response = await fetch('/api/files/bulk', {
@@ -722,7 +757,7 @@ document.querySelector('#bulk-form')!.addEventListener('submit', async event => 
     await loadFiles();
   } catch { if (version === sessionVersion) bulkError.textContent = 'Could not complete the request. Close this dialog and refresh before retrying.'; }
   finally {
-    if (version === sessionVersion) { bulkBusy = false; bulkConfirm.disabled = false; bulkConfirm.textContent = action.action === 'move' ? 'Move selected' : 'Delete permanently'; }
+    if (version === sessionVersion) { bulkBusy = false; bulkConfirm.disabled = false; setButton(bulkConfirm, action.action === 'move' ? 'Move selected' : 'Delete permanently', action.action === 'move' ? 'folder-input' : 'trash-2'); }
   }
 });
 
@@ -746,7 +781,7 @@ function openShare(file: LibraryFile) {
   shareMessage.textContent = '';
   shareResult.hidden = true; shareUrl.value = '';
   shareForm.reset(); shareDuration.max = '30';
-  createShareButton.disabled = false; createShareButton.textContent = 'Create link';
+  createShareButton.disabled = false; setButton(createShareButton, 'Create link', 'link-2');
   shareList.textContent = 'Loading active links…';
   if (!shareDialog.open) shareDialog.showModal();
   void loadShares();
@@ -772,7 +807,7 @@ async function loadShares() {
     for (const link of result.links) {
       const row = document.createElement('div'); row.className = 'share-link-row';
       const description = document.createElement('span'); description.textContent = `Link ${link.id} · expires ${new Date(link.expires_at).toLocaleString()}`;
-      const revoke = document.createElement('button'); revoke.type = 'button'; revoke.className = 'text-button danger'; revoke.textContent = 'Revoke'; revoke.setAttribute('aria-label', `Revoke link ${link.id}`);
+      const revoke = document.createElement('button'); revoke.type = 'button'; revoke.className = 'text-button danger'; revoke.append(icon('unlink'), 'Revoke'); revoke.setAttribute('aria-label', `Revoke link ${link.id}`);
       revoke.addEventListener('click', async () => {
         revoke.disabled = true;
         try {
@@ -788,6 +823,7 @@ async function loadShares() {
       });
       row.append(description, revoke); shareList.append(row);
     }
+    refreshIcons();
   } catch (error) { if (generation === shareGeneration) shareList.textContent = error instanceof Error ? error.message : 'Could not load links.'; }
 }
 shareForm.addEventListener('submit', async event => {
@@ -795,7 +831,7 @@ shareForm.addEventListener('submit', async event => {
   if (!sharedFile || createShareButton.disabled) return;
   const generation = shareGeneration;
   const fileId = sharedFile.id;
-  createShareButton.disabled = true; createShareButton.textContent = 'Creating…'; shareMessage.textContent = '';
+  createShareButton.disabled = true; setButton(createShareButton, 'Creating…', 'loader-circle'); shareMessage.textContent = '';
   try {
     const response = await fetch(`/api/files/${fileId}/shares`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ durationMinutes: Number(shareDuration.value) * Number(shareUnit.value) }) });
     if (generation !== shareGeneration) return;
@@ -810,7 +846,7 @@ shareForm.addEventListener('submit', async event => {
     shareMessage.textContent = 'Link created. Copy it to share this file.';
     await loadShares();
   } catch { if (generation === shareGeneration) shareMessage.textContent = 'Could not create the link. Refresh active links before retrying.'; }
-  finally { if (generation === shareGeneration) { createShareButton.disabled = false; createShareButton.textContent = 'Create link'; } }
+  finally { if (generation === shareGeneration) { createShareButton.disabled = false; setButton(createShareButton, 'Create link', 'link-2'); } }
 });
 document.querySelector('#copy-share')!.addEventListener('click', async () => {
   if (!shareUrl.value) return;
@@ -818,3 +854,4 @@ document.querySelector('#copy-share')!.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(shareUrl.value); if (generation === shareGeneration) shareMessage.textContent = 'Link copied.'; }
   catch { if (generation === shareGeneration) { shareUrl.focus(); shareUrl.select(); shareMessage.textContent = 'Select and copy the link above.'; } }
 });
+refreshIcons();

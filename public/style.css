@@ -133,3 +133,36 @@ html[data-theme="dark"] .album-card .album-tile,html[data-theme="dark"] .album-c
 html[data-theme="dark"] .empty{border-color:#43574a}html[data-theme="dark"] dialog::backdrop{background:#050906aa}html[data-theme="dark"] #preview-content pre,html[data-theme="dark"] #shared-preview pre{background:#111a15;color:#dce7de}
 html[data-theme="dark"] #share-result{background:#223229}html[data-theme="dark"] .download-button{background:#56785d;color:#fff}html[data-theme="dark"] .download-button:hover{background:#668c69}
 @media(max-width:480px){#workspace-nav .theme-switch>span:first-child{display:none}#workspace-nav .theme-switch{gap:0}}
+
+/* Lucide icon alignment and public theme controls */
+.lucide{width:16px;height:16px;flex:0 0 auto;stroke:currentColor}
+button:has(>.lucide),a:has(>.lucide){display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.cloud .lucide{width:30px;height:30px}.album-kind .lucide{width:16px;height:16px}.album-cover>.lucide{width:48px;height:48px}.album-menu summary .lucide{width:20px;height:20px}#profile-menu summary .lucide{width:18px;height:18px}.theme-switch>.lucide{width:15px;height:15px}
+.guest-controls{display:flex;align-items:center;gap:20px}.guest-controls .theme-switch{display:flex;align-items:center;gap:7px;margin:0;color:#728072;font-size:14px;cursor:pointer}
+header:has(#workspace-nav:not([hidden]))>.guest-controls{display:none}
+.profile-menu-items button:has(>.lucide),.album-action:has(>.lucide){justify-content:flex-start}
+.lucide-loader-circle{animation:icon-spin .8s linear infinite}@keyframes icon-spin{to{transform:rotate(360deg)}}
+.album-menu-items{gap:2px;padding:8px}.album-card:has(.album-menu[open]){border-color:#88a379;box-shadow:0 16px 42px #25372f26}
+html[data-theme="dark"] .album-menu-items{border-color:#4a6051;background:#18231d;box-shadow:0 20px 48px #000b}
+html[data-theme="dark"] .album-action{background:transparent;color:#d8e4da}
+html[data-theme="dark"] .album-action:hover{background:#304438;color:#f1f6f2}
+html[data-theme="dark"] .album-action.danger{border-color:#3c4d42;background:transparent;color:#e38e87}
+html[data-theme="dark"] .album-action.danger:hover{background:#4a2f2c;color:#ffaaa2}
+html[data-theme="dark"] .album-card:has(.album-menu[open]){border-color:#739268;box-shadow:0 18px 48px #000a}
+html[data-theme="dark"] .guest-controls .theme-switch{color:#a8b8ad}
+@media(max-width:480px){.guest-controls{gap:12px}.guest-controls .private{display:none}.guest-controls .theme-switch>.lucide{display:none}}
+
+/* Drag-and-drop upload */
+.upload-box{position:relative;transition:background .18s,border-color .18s,box-shadow .18s,transform .18s}
+.upload-box::after{content:"Drop files to add them";position:absolute;inset:8px;z-index:3;display:grid;place-items:center;border:2px dashed #78966d;border-radius:10px;background:#edf4e7e8;color:#3e5d46;font-size:16px;font-weight:700;letter-spacing:-.2px;opacity:0;pointer-events:none;transform:scale(.985);transition:opacity .16s,transform .16s}
+.upload-box.drag-active{border-color:#6f9166;background:#eaf2e4;box-shadow:0 0 0 4px #819d7440,0 14px 36px #35452918;transform:translateY(-2px)}
+.upload-box.drag-active::after{opacity:1;transform:scale(1)}
+.drop-zone-content{display:flex;flex-direction:column;align-items:center;padding:14px 12px 20px;text-align:center}
+.drop-zone-content>strong{font-size:17px}.drop-zone-content>span{margin-top:5px;color:#788573;font-size:12px}
+.drop-zone-icon{display:grid;place-items:center;width:54px;height:54px;margin-bottom:14px;border-radius:16px;background:#e2ebda;color:#56754f;transition:transform .18s,background .18s}.drop-zone-icon .lucide{width:28px;height:28px}
+.upload-box.drag-active .drop-zone-icon{background:#d6e5cc;transform:translateY(-3px) scale(1.06)}
+#choose-files{width:auto;margin-top:15px;padding:10px 15px}.drop-zone-content #upload-selection{margin:12px 0 0}
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+html[data-theme="dark"] .upload-box::after{border-color:#81a477;background:#1b2b22ee;color:#c7ddc0}
+html[data-theme="dark"] .upload-box.drag-active{border-color:#72956a;background:#213429;box-shadow:0 0 0 4px #74966a38,0 16px 40px #0007}
+html[data-theme="dark"] .drop-zone-content>span{color:#91a297}html[data-theme="dark"] .drop-zone-icon{background:#2b4033;color:#b7d1aa}html[data-theme="dark"] .upload-box.drag-active .drop-zone-icon{background:#36513f}

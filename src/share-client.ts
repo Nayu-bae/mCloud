@@ -2,6 +2,8 @@
 export {};
 const name = document.querySelector<HTMLElement>('#shared-name')!;
 const status = document.querySelector<HTMLElement>('#shared-status')!;
+type LucideBrowser = { createIcons: (options?: { attrs?: Record<string, string> }) => void };
+const refreshIcons = () => (window as unknown as { lucide?: LucideBrowser }).lucide?.createIcons({ attrs: { 'stroke-width': '2' } });
 const preview = document.querySelector<HTMLElement>('#shared-preview')!;
 const download = document.querySelector<HTMLAnchorElement>('#shared-download')!;
 let expiresAt = 0;
@@ -45,3 +47,4 @@ async function load() {
   } catch { unavailable('Could not load this shared file. Please try again.'); }
 }
 void load();
+refreshIcons();
