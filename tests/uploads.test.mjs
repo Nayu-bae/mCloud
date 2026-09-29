@@ -68,15 +68,20 @@ test('private uploads, download, rename, delete, limits and restart recovery', a
     assert.equal((await fetch(base+`/api/files/${file.id}/download`,{headers:{cookie}})).status,404);
     assert.equal(readdirSync(directory).length,2);
     assert.equal(files.listForUser(member.id).length,2);
+    const reuploaded = await upload(cookie,'uploaded again','renamed.txt');
+    assert.equal(reuploaded.status,201);
+    assert.equal((await reuploaded.json()).file.name,'renamed.txt');
+    assert.equal(readdirSync(directory).length,3);
+    assert.equal(files.listForUser(member.id).length,3);
     await new Promise(resolve=>server.close(resolve));
     writeFileSync(join(directory,'00000000-0000-0000-0000-000000000000'),'orphan');
     writeFileSync(join(directory,'.upload-00000000-0000-0000-0000-000000000001'),'partial');
     server=createApp(users,false,{files,directory,maxUpload:32}).listen(0,'127.0.0.1');
     await once(server,'listening');
     base=`http://127.0.0.1:${server.address().port}`;
-    assert.equal(readdirSync(directory).length,2);
+    assert.equal(readdirSync(directory).length,3);
     const renewed=await login('member','member-test-password');
-    assert.equal((await (await fetch(base+'/api/files',{headers:{cookie:renewed}})).json()).files.length,2);
+    assert.equal((await (await fetch(base+'/api/files',{headers:{cookie:renewed}})).json()).files.length,3);
   } finally {
     await new Promise(resolve=>server.close(resolve));
     users.close(); files.close(); rmSync(dir,{recursive:true,force:true});

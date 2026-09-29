@@ -263,6 +263,19 @@ function sizeLabel(bytes: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+async function uploadFailure(response: Response): Promise<string> {
+  if (response.status === 413) {
+    return `The web server rejected this upload as too large. Its request limit may be lower than mCloud's ${sizeLabel(maxUploadBytes)} limit.`;
+  }
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      const result = await response.json() as { error?: unknown };
+      if (typeof result.error === 'string' && result.error) return result.error;
+    } catch { /* Fall through to the status-based message. */ }
+  }
+  return `Upload failed because the web server returned ${response.status}${response.statusText ? ` ${response.statusText}` : ''}.`;
+}
 function setLibraryMessage(message: string) {
   fileMessage.textContent = message;
   albumMessage.textContent = message;
@@ -356,7 +369,7 @@ uploadForm.addEventListener('submit', async event => {
       const response = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), 'X-Folder-Id': destinationFolder === null ? '' : String(destinationFolder) }, body: file, signal: controller.signal });
       if (version !== sessionVersion) return;
       if (response.status === 401) { showSession(); return; }
-      if (!response.ok) throw new Error((await response.json()).error || 'Upload failed.');
+      if (!response.ok) throw new Error(await uploadFailure(response));
       completed++;
     }
     uploadForm.reset();
