@@ -13,9 +13,11 @@ const app = express();
 const lifetime = 8 * 60 * 60 * 1000;
 const sessions = new Map<string, { userId: number; expiresAt: number }>();
 const attempts = new Map<string, { count: number; until: number }>();
+const accountAttempts = new Map<string, { count: number; until: number }>();
 const token = (req: express.Request) => req.headers.cookie?.split(';').map(v => v.trim()).find(v => v.startsWith('mcloud_session='))?.slice(15);
 const cookieOptions = { httpOnly: true, secure: production, sameSite: 'strict' as const, path: '/' };
 app.disable('x-powered-by');
+if (production) app.set('trust proxy', 'loopback');
 app.use((_req, res, next) => {
   res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" });
   next();
@@ -51,13 +53,18 @@ app.get('/api/session', (req, res) => {
 app.post('/api/login', async (req, res, next) => {
   try {
   const key = req.ip || 'unknown';
+  const accountKey = typeof req.body?.username === 'string' ? req.body.username : '<invalid>';
   let attempt = attempts.get(key);
+  let accountAttempt = accountAttempts.get(accountKey);
   if (!attempt || attempt.until < Date.now()) { attempt = { count: 0, until: Date.now() + 15 * 60 * 1000 }; attempts.set(key, attempt); }
-  if (attempt.count >= 10) { res.status(429).json({ error: 'Too many attempts. Please try again in 15 minutes.' }); return; }
+  if (!accountAttempt || accountAttempt.until < Date.now()) { accountAttempt = { count: 0, until: Date.now() + 15 * 60 * 1000 }; accountAttempts.set(accountKey, accountAttempt); }
+  if (attempt.count >= 10 || accountAttempt.count >= 10) { res.status(429).json({ error: 'Too many attempts. Please try again in 15 minutes.' }); return; }
   attempt.count++;
+  accountAttempt.count++;
   const user = await users.authenticate(req.body?.username, req.body?.password);
   if (!user) { res.status(401).json({ error: 'Incorrect username or password.' }); return; }
   attempts.delete(key);
+  accountAttempts.delete(accountKey);
   sessions.delete(token(req) || '');
   const session = randomBytes(32).toString('hex');
   sessions.set(session, { userId: user.id, expiresAt: Date.now() + lifetime });
@@ -119,6 +126,7 @@ app.delete('/api/admin/users/:id', (req, res, next) => {
 setInterval(() => {
   for (const [key, session] of sessions) if (session.expiresAt < Date.now()) sessions.delete(key);
   for (const [key, attempt] of attempts) if (attempt.until < Date.now()) attempts.delete(key);
+  for (const [key, attempt] of accountAttempts) if (attempt.until < Date.now()) accountAttempts.delete(key);
 }, 60_000).unref();
 app.get('/app.js', (_req, res) => res.sendFile(fileURLToPath(new URL('./client.js', import.meta.url))));
 app.use(express.static(fileURLToPath(new URL('../public', import.meta.url))));

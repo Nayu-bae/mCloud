@@ -9,4 +9,5 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT m
 const users = new Users();
 await users.bootstrap(process.env.SITE_USERNAME, process.env.SITE_PASSWORD);
 const app = createApp(users, process.env.NODE_ENV === 'production', { files: new Files(), directory: fileURLToPath(new URL('../data/uploads/', import.meta.url)), publicUrl: process.env.PUBLIC_URL });
-app.listen(port, () => console.log(`mCloud running at http://localhost:${port}`));
+// Only the reverse proxy on this machine should reach the application port.
+app.listen(port, '127.0.0.1', () => console.log(`mCloud running at http://127.0.0.1:${port}`));

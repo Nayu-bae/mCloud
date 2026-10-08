@@ -71,3 +71,29 @@ test('admin-only creation, login for new users, no role escalation, and logout p
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test('production login throttling limits both proxy source and targeted account', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'mcloud-throttle-test-'));
+  const users = new Users(join(folder, 'users.sqlite'));
+  await users.bootstrap('owner', 'owner-test-password');
+  await users.add('member', 'member-test-password');
+  const server = createApp(users, true).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const login = (username, password, forwardedFor) => fetch(base + '/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': forwardedFor },
+    body: JSON.stringify({ username, password })
+  });
+  try {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      assert.equal((await login('owner', 'wrong-password', `203.0.113.${attempt + 1}`)).status, 401);
+    }
+    assert.equal((await login('owner', 'owner-test-password', '203.0.113.20')).status, 429);
+    assert.equal((await login('member', 'member-test-password', '203.0.113.20')).status, 200);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    users.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
