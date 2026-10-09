@@ -94,6 +94,7 @@ export function shareRoutes(files: Files, directory: string, publicUrl?: string,
         path: contents.path.map(folder => ({ id: folder.id, name: folder.name })),
         folders: contents.folders,
         files: contents.files.map(publicFile),
+        destinations: files.foldersWithin(share.user_id, share.id).map(folder => ({ id: folder.id, name: folder.name, parentId: folder.id === share.id ? null : folder.parent_id })),
         expiresAt: share.expires_at,
         maxUploadBytes: maxUpload
       });
@@ -109,6 +110,26 @@ export function shareRoutes(files: Files, directory: string, publicUrl?: string,
       if (!folderShare(req.params.token)) throw new FolderError('This link has expired or was revoked.', 404);
       res.status(201).json({ folder });
     } catch (error) { next(error); }
+  });
+  router.patch('/:token/folders/:id', (req, res, next) => {
+    const share = folderShare(req.params.token);
+    const id = Number(req.params.id);
+    if (!share || id === share.id || !files.folderWithin(share.user_id, share.id, id)) { unavailable(res); return; }
+    try {
+      if (Object.hasOwn(req.body || {}, 'parentId')) files.bulk(share.user_id, 'move', [], [id], sharedFolderId(share, req.body.parentId));
+      else {
+        if (!validName(req.body?.name)) throw new FolderError('Enter a valid folder name without slashes or control characters.');
+        files.renameFolder(share.user_id, id, req.body.name.trim());
+      }
+      res.json({ folder: files.folder(share.user_id, id) });
+    } catch (error) { next(error); }
+  });
+  router.delete('/:token/folders/:id', (req, res, next) => {
+    const share = folderShare(req.params.token);
+    const id = Number(req.params.id);
+    if (!share || id === share.id || !files.folderWithin(share.user_id, share.id, id)) { unavailable(res); return; }
+    try { files.deleteFolder(share.user_id, id); res.status(204).end(); }
+    catch (error) { next(error); }
   });
   router.post('/:token/upload', async (req, res, next) => {
     const share = folderShare(req.params.token);
@@ -171,6 +192,28 @@ export function shareRoutes(files: Files, directory: string, publicUrl?: string,
     if (!file || !existsSync(join(directory, file.storage_key))) { unavailable(res); return; }
     res.set('Content-Type', 'application/octet-stream');
     res.download(join(directory, file.storage_key), file.original_name, error => { if (error && !res.headersSent) next(error); });
+  });
+  router.patch('/:token/files/:id', (req, res, next) => {
+    const share = folderShare(req.params.token);
+    const file = share && files.sharedFile(share, Number(req.params.id));
+    if (!share || !file) { unavailable(res); return; }
+    try {
+      if (Object.hasOwn(req.body || {}, 'folderId')) files.move(share.user_id, file.id, sharedFolderId(share, req.body.folderId));
+      else {
+        if (!validName(req.body?.name)) throw new FolderError('Use a filename of 1–255 characters without slashes or control characters.');
+        files.rename(share.user_id, file.id, req.body.name.trim());
+      }
+      res.json({ file: publicFile(files.getForUser(share.user_id, file.id)!) });
+    } catch (error) { next(error); }
+  });
+  router.delete('/:token/files/:id', async (req, res, next) => {
+    const share = folderShare(req.params.token);
+    const file = share && files.sharedFile(share, Number(req.params.id));
+    if (!share || !file) { unavailable(res); return; }
+    files.remove(share.user_id, file.id);
+    try { await unlink(join(directory, file.storage_key)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { next(error); return; } }
+    res.status(204).end();
   });
   router.get('/:token/content', async (req, res, next) => {
     const file = files.resolveShare(req.params.token);

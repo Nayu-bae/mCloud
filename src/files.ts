@@ -205,6 +205,13 @@ export class Files {
     ) SELECT 1 FROM descendants WHERE id = ?`).get(rootId, userId, userId, folderId));
   }
 
+  foldersWithin(userId: number, rootId: number): Folder[] {
+    return this.db.prepare(`WITH RECURSIVE descendants(id, name, parent_id, created_at) AS (
+      SELECT id, name, parent_id, created_at FROM folders WHERE id = ? AND user_id = ?
+      UNION ALL SELECT folders.id, folders.name, folders.parent_id, folders.created_at FROM folders JOIN descendants ON folders.parent_id = descendants.id WHERE folders.user_id = ?
+    ) SELECT id, name, parent_id, created_at FROM descendants ORDER BY name COLLATE NOCASE`).all(rootId, userId, userId) as Folder[];
+  }
+
   sharedFolderContents(share: ResolvedFolderShare, folderId: number): { folder: Folder; folders: Folder[]; files: StoredFile[]; path: Folder[] } {
     if (!this.folderWithin(share.user_id, share.id, folderId)) throw new FolderError('Folder not found.', 404);
     const folder = this.folder(share.user_id, folderId)!;

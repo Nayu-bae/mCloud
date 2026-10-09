@@ -19,6 +19,14 @@ let expiresAt = 0;
 let token = '';
 let currentFolderId = 0;
 let maxUploadBytes = 100 * 1024 * 1024;
+let destinations: { id: number; name: string; parentId: number | null }[] = [];
+type SharedAction = { action: 'move' | 'rename' | 'delete'; kind: 'file' | 'folder'; id: number; name: string };
+let pendingAction: SharedAction | undefined;
+const actionDialog = document.querySelector<HTMLDialogElement>('#shared-action-dialog')!;
+const actionForm = document.querySelector<HTMLFormElement>('#shared-action-form')!;
+const actionName = document.querySelector<HTMLInputElement>('#shared-action-name')!;
+const actionDestination = document.querySelector<HTMLSelectElement>('#shared-action-destination')!;
+const actionError = document.querySelector<HTMLElement>('#shared-action-error')!;
 function unavailable(message: string) {
   preview.replaceChildren(); download.hidden = true; download.removeAttribute('href');
   name.textContent = 'Link unavailable'; status.textContent = message;
@@ -33,12 +41,51 @@ async function errorMessage(response: Response, fallback: string) {
   try { const result = await response.json(); return typeof result.error === 'string' ? result.error : fallback; }
   catch { return fallback; }
 }
+function menuAction(label: string, iconName: string, action: () => void, danger = false) {
+  const button = document.createElement('button'); button.type = 'button'; button.className = `album-action${danger ? ' danger' : ''}`;
+  button.innerHTML = `<i data-lucide="${iconName}" aria-hidden="true"></i>`; button.append(label);
+  button.addEventListener('click', () => { button.closest('details')?.removeAttribute('open'); action(); }); return button;
+}
+function actionMenu(name: string, ...items: HTMLElement[]) {
+  const menu = document.createElement('details'); menu.className = 'album-menu';
+  const summary = document.createElement('summary'); summary.innerHTML = '<i data-lucide="more-vertical" aria-hidden="true"></i>'; summary.setAttribute('aria-label', `More actions for ${name}`);
+  const actions = document.createElement('div'); actions.className = 'album-menu-items'; actions.append(...items); menu.append(summary, actions); return menu;
+}
+async function copyScopedLink(url: string) {
+  try { await navigator.clipboard.writeText(url); folderMessage.textContent = 'Link copied. It expires with this shared folder.'; }
+  catch { folderMessage.textContent = `Copy this link: ${url}`; }
+}
+function destinationLabel(folder: { id: number; name: string; parentId: number | null }) {
+  const names = [folder.name]; let parentId = folder.parentId; const seen = new Set<number>();
+  while (parentId !== null && !seen.has(parentId)) { seen.add(parentId); const parent = destinations.find(item => item.id === parentId); if (!parent) break; names.unshift(parent.name); parentId = parent.parentId; }
+  return names.join(' / ');
+}
+function openManageAction(action: SharedAction['action'], kind: SharedAction['kind'], id: number, itemName: string) {
+  pendingAction = { action, kind, id, name: itemName }; actionError.textContent = '';
+  const moving = action === 'move'; const deleting = action === 'delete';
+  document.querySelector('#shared-action-title')!.textContent = `${moving ? 'Move' : deleting ? 'Delete' : 'Rename'} ${kind}`;
+  document.querySelector('#shared-action-description')!.textContent = deleting ? `Permanently delete “${itemName}”? Non-empty folders cannot be deleted.` : moving ? 'Choose a destination inside this shared folder.' : `Choose a new name for “${itemName}”.`;
+  document.querySelector<HTMLElement>('#shared-action-name-label')!.hidden = moving || deleting; actionName.hidden = moving || deleting; actionName.required = !moving && !deleting; actionName.value = itemName;
+  document.querySelector<HTMLElement>('#shared-action-destination-label')!.hidden = !moving; actionDestination.hidden = !moving; actionDestination.disabled = !moving; actionDestination.replaceChildren();
+  if (moving) {
+    const blocked = new Set<number>();
+    if (kind === 'folder') {
+      blocked.add(id);
+      let changed = true;
+      while (changed) { changed = false; for (const folder of destinations) if (folder.parentId !== null && blocked.has(folder.parentId) && !blocked.has(folder.id)) { blocked.add(folder.id); changed = true; } }
+    }
+    for (const folder of destinations.filter(folder => !blocked.has(folder.id)).sort((a, b) => destinationLabel(a).localeCompare(destinationLabel(b)))) actionDestination.append(new Option(destinationLabel(folder), String(folder.id)));
+    actionDestination.value = String(currentFolderId);
+  }
+  const confirm = document.querySelector<HTMLButtonElement>('#confirm-shared-action')!; confirm.className = deleting ? 'danger-button' : ''; confirm.textContent = deleting ? 'Delete permanently' : moving ? 'Move' : 'Save name';
+  actionDialog.showModal(); if (!moving && !deleting) actionName.focus();
+}
 async function loadFolder(folderId?: number) {
   const base = `/s/${token}`;
   const response = await fetch(`${base}/folders${folderId ? `?folderId=${folderId}` : ''}`);
   if (!response.ok) { unavailable('This folder link has expired, was revoked, or is unavailable.'); return; }
   const result = await response.json();
-  expiresAt = result.expiresAt; maxUploadBytes = result.maxUploadBytes; currentFolderId = result.folder.id;
+  expiresAt = result.expiresAt; maxUploadBytes = result.maxUploadBytes; currentFolderId = result.folder.id; destinations = result.destinations;
   name.textContent = result.path[0].name;
   status.textContent = `Upload access available until ${new Date(expiresAt).toLocaleString()}. Only this shared folder and its contents are visible.`;
   folderPath.replaceChildren();
@@ -52,7 +99,16 @@ async function loadFolder(folderId?: number) {
     const card = document.createElement('article'); card.className = 'album-card folder-card';
     const heading = document.createElement('div'); heading.className = 'album-card-heading';
     const kind = document.createElement('span'); kind.className = 'album-kind'; kind.innerHTML = '<i data-lucide="folder" aria-hidden="true"></i>';
-    const label = document.createElement('strong'); label.textContent = folder.name; label.title = folder.name; heading.append(kind, label);
+    const label = document.createElement('strong'); label.textContent = folder.name; label.title = folder.name;
+    const scopedUrl = `${location.origin}/s/${token}?folder=${folder.id}`;
+    const menu = actionMenu(folder.name,
+      menuAction('Open', 'folder-open', () => void loadFolder(folder.id)),
+      menuAction('Share link', 'link-2', () => void copyScopedLink(scopedUrl)),
+      menuAction('Move', 'folder-input', () => openManageAction('move', 'folder', folder.id, folder.name)),
+      menuAction('Rename', 'pencil', () => openManageAction('rename', 'folder', folder.id, folder.name)),
+      menuAction('Delete', 'trash-2', () => openManageAction('delete', 'folder', folder.id, folder.name), true)
+    );
+    heading.append(kind, label, menu);
     const tile = document.createElement('button'); tile.type = 'button'; tile.className = 'album-tile folder-tile'; tile.setAttribute('aria-label', `Open folder ${folder.name}`);
     const cover = document.createElement('span'); cover.className = 'album-cover folder-cover'; cover.innerHTML = '<i data-lucide="folder" aria-hidden="true"></i>'; tile.append(cover);
     const footer = document.createElement('div'); footer.className = 'album-card-footer'; footer.textContent = 'Folder';
@@ -64,12 +120,14 @@ async function loadFolder(folderId?: number) {
     const kind = document.createElement('span'); kind.className = `album-kind ${file.previewKind}`;
     kind.innerHTML = `<i data-lucide="${file.previewKind === 'image' ? 'image' : file.previewKind === 'video' ? 'file-video' : file.previewKind === 'audio' ? 'file-audio' : file.previewKind === 'pdf' || file.previewKind === 'text' ? 'file-text' : 'file'}" aria-hidden="true"></i>`;
     const label = document.createElement('strong'); label.textContent = file.name; label.title = file.name;
-    const menu = document.createElement('details'); menu.className = 'album-menu';
-    const summary = document.createElement('summary'); summary.innerHTML = '<i data-lucide="more-vertical" aria-hidden="true"></i>'; summary.setAttribute('aria-label', `More actions for ${file.name}`);
-    const actions = document.createElement('div'); actions.className = 'album-menu-items';
     const openAction = document.createElement('a'); openAction.className = 'album-action'; openAction.href = `${base}/files/${file.id}/content`; openAction.target = '_blank'; openAction.rel = 'noopener'; openAction.innerHTML = '<i data-lucide="eye" aria-hidden="true"></i>Open';
     const save = document.createElement('a'); save.className = 'album-action'; save.href = `${base}/files/${file.id}/download`; save.innerHTML = '<i data-lucide="download" aria-hidden="true"></i>Download';
-    actions.append(openAction, save); menu.append(summary, actions); heading.append(kind, label, menu);
+    const menu = actionMenu(file.name, openAction, save,
+      menuAction('Share link', 'link-2', () => void copyScopedLink(`${location.origin}${base}/files/${file.id}/content`)),
+      menuAction('Move', 'folder-input', () => openManageAction('move', 'file', file.id, file.name)),
+      menuAction('Rename', 'pencil', () => openManageAction('rename', 'file', file.id, file.name)),
+      menuAction('Delete', 'trash-2', () => openManageAction('delete', 'file', file.id, file.name), true)
+    ); heading.append(kind, label, menu);
     const open = document.createElement('a'); open.className = 'album-tile'; open.href = `${base}/files/${file.id}/content`; open.target = '_blank'; open.rel = 'noopener'; open.setAttribute('aria-label', `Open ${file.name}`);
     const cover = document.createElement('span'); cover.className = 'album-cover';
     if (file.previewKind === 'image') { const image = document.createElement('img'); image.src = open.href; image.alt = file.name; image.loading = 'lazy'; cover.append(image); }
@@ -94,7 +152,8 @@ async function load() {
     name.textContent = info.name;
     if (info.type === 'folder') {
       fileView.hidden = true; folderView.hidden = false;
-      await loadFolder(); expireWhenDue(); return;
+      const requestedFolder = Number(new URLSearchParams(location.search).get('folder'));
+      await loadFolder(Number.isSafeInteger(requestedFolder) && requestedFolder > 0 ? requestedFolder : undefined); expireWhenDue(); return;
     }
     status.textContent = `Available until ${new Date(expiresAt).toLocaleString()}.`;
     download.href = `${base}/download`; download.hidden = false;
@@ -144,6 +203,22 @@ document.querySelector('#open-shared-new-folder')!.addEventListener('click', () 
   newFolderForm.reset(); folderDialog.showModal(); newFolderName.focus();
 });
 document.querySelector('#cancel-shared-new-folder')!.addEventListener('click', () => folderDialog.close());
+document.querySelector('#cancel-shared-action')!.addEventListener('click', () => actionDialog.close());
+actionForm.addEventListener('submit', async event => {
+  event.preventDefault(); if (!pendingAction) return;
+  const pending = pendingAction;
+  const endpoint = `/s/${token}/${pending.kind === 'file' ? 'files' : 'folders'}/${pending.id}`;
+  const body = pending.action === 'move'
+    ? { [pending.kind === 'file' ? 'folderId' : 'parentId']: Number(actionDestination.value) }
+    : { name: actionName.value };
+  const confirm = document.querySelector<HTMLButtonElement>('#confirm-shared-action')!; confirm.disabled = true; actionError.textContent = '';
+  try {
+    const response = await fetch(endpoint, pending.action === 'delete' ? { method: 'DELETE' } : { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(await errorMessage(response, `Could not ${pending.action} this ${pending.kind}.`));
+    actionDialog.close(); await loadFolder(currentFolderId); folderMessage.textContent = `${pending.kind === 'file' ? 'File' : 'Folder'} ${pending.action === 'delete' ? 'deleted' : pending.action === 'move' ? 'moved' : 'renamed'}.`;
+  } catch (error) { actionError.textContent = error instanceof Error ? error.message : 'Could not update this item.'; }
+  finally { confirm.disabled = false; }
+});
 document.addEventListener('click', event => {
   if (!(event.target instanceof Node)) return;
   for (const menu of document.querySelectorAll<HTMLDetailsElement>('#shared-folder-grid .album-menu[open]')) if (!menu.contains(event.target)) menu.open = false;
