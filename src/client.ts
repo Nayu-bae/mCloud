@@ -797,11 +797,11 @@ function openShare(item: LibraryFile | LibraryFolder, kind: 'file' | 'folder' = 
   document.querySelector('#share-title')!.textContent = kind === 'folder' ? 'Share folder' : 'Share file';
   document.querySelector('#share-filename')!.textContent = item.name;
   document.querySelector('.share-notice')!.textContent = kind === 'folder'
-    ? 'Anyone with this link can browse this folder and its subfolders, upload files, and create folders until it expires. Parent folders remain hidden.'
-    : 'Anyone with this link can view or download this file until it expires. You can revoke access early below.';
+    ? 'Anyone with this link can fully manage this folder and its contents while the link is active. Parent folders remain hidden.'
+    : 'Anyone with this link can view or download this file while the link is active. You can revoke access below.';
   shareMessage.textContent = '';
   shareResult.hidden = true; shareUrl.value = '';
-  shareForm.reset(); shareDuration.max = '30';
+  shareForm.reset(); updateShareDuration();
   createShareButton.disabled = false; setButton(createShareButton, 'Create link', 'link-2');
   shareList.textContent = 'Loading active links…';
   if (!shareDialog.open) shareDialog.showModal();
@@ -810,7 +810,16 @@ function openShare(item: LibraryFile | LibraryFolder, kind: 'file' | 'folder' = 
 shareDialog.addEventListener('close', () => { shareGeneration++; sharedTarget = undefined; shareUrl.value = ''; shareResult.hidden = true; shareList.replaceChildren(); });
 document.querySelector('#close-share')!.addEventListener('click', () => shareDialog.close());
 document.querySelector('#share-preview')!.addEventListener('click', () => { const file = previewFiles[previewIndex]; if (file) openShare(file); });
-shareUnit.addEventListener('change', () => { shareDuration.max = String(43200 / Number(shareUnit.value)); });
+function updateShareDuration() {
+  const infinite = shareUnit.value === 'infinite';
+  shareDuration.disabled = infinite; shareDuration.required = !infinite;
+  if (!infinite) {
+    shareDuration.max = String(Math.floor(525600 / Number(shareUnit.value)));
+    if (Number(shareDuration.value) > Number(shareDuration.max)) shareDuration.value = shareDuration.max;
+    if (Number(shareDuration.value) < 1) shareDuration.value = '1';
+  }
+}
+shareUnit.addEventListener('change', updateShareDuration);
 document.querySelector('#refresh-shares')!.addEventListener('click', () => void loadShares());
 async function loadShares() {
   if (!sharedTarget) return;
@@ -821,13 +830,13 @@ async function loadShares() {
     if (generation !== shareGeneration) return;
     if (response.status === 401) { showSession(); return; }
     if (!response.ok) throw new Error('Could not load links. Use Refresh links to try again.');
-    const result = await response.json() as { links: { id: number; created_at: number; expires_at: number }[] };
+    const result = await response.json() as { links: { id: number; created_at: number; expires_at: number; neverExpires: boolean }[] };
     if (generation !== shareGeneration) return;
     shareList.replaceChildren();
     if (!result.links.length) shareList.textContent = 'No active links.';
     for (const link of result.links) {
       const row = document.createElement('div'); row.className = 'share-link-row';
-      const description = document.createElement('span'); description.textContent = `Link ${link.id} · expires ${new Date(link.expires_at).toLocaleString()}`;
+      const description = document.createElement('span'); description.textContent = `Link ${link.id} · ${link.neverExpires ? 'does not expire' : `expires ${new Date(link.expires_at).toLocaleString()}`}`;
       const revoke = document.createElement('button'); revoke.type = 'button'; revoke.className = 'text-button danger'; revoke.append(icon('unlink'), 'Revoke'); revoke.setAttribute('aria-label', `Revoke link ${link.id}`);
       revoke.addEventListener('click', async () => {
         revoke.disabled = true;
@@ -854,7 +863,8 @@ shareForm.addEventListener('submit', async event => {
   const target = sharedTarget;
   createShareButton.disabled = true; setButton(createShareButton, 'Creating…', 'loader-circle'); shareMessage.textContent = '';
   try {
-    const response = await fetch(shareEndpoint(target), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ durationMinutes: Number(shareDuration.value) * Number(shareUnit.value) }) });
+    const durationMinutes = shareUnit.value === 'infinite' ? 'infinite' : Number(shareDuration.value) * Number(shareUnit.value);
+    const response = await fetch(shareEndpoint(target), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ durationMinutes }) });
     if (generation !== shareGeneration) return;
     if (response.status === 401) { showSession(); return; }
     const result = await response.json();
@@ -863,7 +873,7 @@ shareForm.addEventListener('submit', async event => {
     createdShareId = result.id;
     shareUrl.value = new URL(result.path, location.origin).href;
     shareResult.hidden = false;
-    document.querySelector('#share-expiry')!.textContent = `Expires ${new Date(result.expiresAt).toLocaleString()}`;
+    document.querySelector('#share-expiry')!.textContent = result.neverExpires ? 'Does not expire. Revoke it from Active links when access should end.' : `Expires ${new Date(result.expiresAt).toLocaleString()}`;
     shareMessage.textContent = `Link created. Copy it to share this ${target.kind}.`;
     await loadShares();
   } catch { if (generation === shareGeneration) shareMessage.textContent = 'Could not create the link. Refresh active links before retrying.'; }

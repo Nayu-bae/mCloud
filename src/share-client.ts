@@ -16,6 +16,7 @@ const folderDialog = document.querySelector<HTMLDialogElement>('#shared-folder-d
 const newFolderForm = document.querySelector<HTMLFormElement>('#shared-new-folder-form')!;
 const newFolderName = document.querySelector<HTMLInputElement>('#shared-new-folder-name')!;
 let expiresAt = 0;
+let neverExpires = false;
 let token = '';
 let currentFolderId = 0;
 let maxUploadBytes = 100 * 1024 * 1024;
@@ -32,6 +33,7 @@ function unavailable(message: string) {
   name.textContent = 'Link unavailable'; status.textContent = message;
 }
 function expireWhenDue() {
+  if (neverExpires) return;
   const remaining = expiresAt - Date.now();
   if (remaining <= 0) { unavailable('This share link has expired. Ask the owner for a new link.'); return; }
   setTimeout(expireWhenDue, Math.min(remaining, 2_000_000_000));
@@ -50,10 +52,6 @@ function actionMenu(name: string, ...items: HTMLElement[]) {
   const menu = document.createElement('details'); menu.className = 'album-menu';
   const summary = document.createElement('summary'); summary.innerHTML = '<i data-lucide="more-vertical" aria-hidden="true"></i>'; summary.setAttribute('aria-label', `More actions for ${name}`);
   const actions = document.createElement('div'); actions.className = 'album-menu-items'; actions.append(...items); menu.append(summary, actions); return menu;
-}
-async function copyScopedLink(url: string) {
-  try { await navigator.clipboard.writeText(url); folderMessage.textContent = 'Link copied. It expires with this shared folder.'; }
-  catch { folderMessage.textContent = `Copy this link: ${url}`; }
 }
 function destinationLabel(folder: { id: number; name: string; parentId: number | null }) {
   const names = [folder.name]; let parentId = folder.parentId; const seen = new Set<number>();
@@ -85,9 +83,9 @@ async function loadFolder(folderId?: number) {
   const response = await fetch(`${base}/folders${folderId ? `?folderId=${folderId}` : ''}`);
   if (!response.ok) { unavailable('This folder link has expired, was revoked, or is unavailable.'); return; }
   const result = await response.json();
-  expiresAt = result.expiresAt; maxUploadBytes = result.maxUploadBytes; currentFolderId = result.folder.id; destinations = result.destinations;
+  expiresAt = result.expiresAt; neverExpires = result.neverExpires; maxUploadBytes = result.maxUploadBytes; currentFolderId = result.folder.id; destinations = result.destinations;
   name.textContent = result.path[0].name;
-  status.textContent = `Upload access available until ${new Date(expiresAt).toLocaleString()}. Only this shared folder and its contents are visible.`;
+  status.textContent = `${neverExpires ? 'This link does not expire.' : `Full access available until ${new Date(expiresAt).toLocaleString()}.`} Only this shared folder and its contents are visible.`;
   folderPath.replaceChildren();
   for (const [index, folder] of result.path.entries()) {
     if (index) folderPath.append(document.createTextNode(' / '));
@@ -100,10 +98,8 @@ async function loadFolder(folderId?: number) {
     const heading = document.createElement('div'); heading.className = 'album-card-heading';
     const kind = document.createElement('span'); kind.className = 'album-kind'; kind.innerHTML = '<i data-lucide="folder" aria-hidden="true"></i>';
     const label = document.createElement('strong'); label.textContent = folder.name; label.title = folder.name;
-    const scopedUrl = `${location.origin}/s/${token}?folder=${folder.id}`;
     const menu = actionMenu(folder.name,
       menuAction('Open', 'folder-open', () => void loadFolder(folder.id)),
-      menuAction('Share link', 'link-2', () => void copyScopedLink(scopedUrl)),
       menuAction('Move', 'folder-input', () => openManageAction('move', 'folder', folder.id, folder.name)),
       menuAction('Rename', 'pencil', () => openManageAction('rename', 'folder', folder.id, folder.name)),
       menuAction('Delete', 'trash-2', () => openManageAction('delete', 'folder', folder.id, folder.name), true)
@@ -123,7 +119,6 @@ async function loadFolder(folderId?: number) {
     const openAction = document.createElement('a'); openAction.className = 'album-action'; openAction.href = `${base}/files/${file.id}/content`; openAction.target = '_blank'; openAction.rel = 'noopener'; openAction.innerHTML = '<i data-lucide="eye" aria-hidden="true"></i>Open';
     const save = document.createElement('a'); save.className = 'album-action'; save.href = `${base}/files/${file.id}/download`; save.innerHTML = '<i data-lucide="download" aria-hidden="true"></i>Download';
     const menu = actionMenu(file.name, openAction, save,
-      menuAction('Share link', 'link-2', () => void copyScopedLink(`${location.origin}${base}/files/${file.id}/content`)),
       menuAction('Move', 'folder-input', () => openManageAction('move', 'file', file.id, file.name)),
       menuAction('Rename', 'pencil', () => openManageAction('rename', 'file', file.id, file.name)),
       menuAction('Delete', 'trash-2', () => openManageAction('delete', 'file', file.id, file.name), true)
@@ -148,6 +143,7 @@ async function load() {
     if (!response.ok) { unavailable('This link has expired, was revoked, or is unavailable.'); return; }
     const info = await response.json();
     expiresAt = info.expiresAt;
+    neverExpires = info.neverExpires;
     if (expiresAt <= Date.now()) { unavailable('This share link has expired.'); return; }
     name.textContent = info.name;
     if (info.type === 'folder') {
@@ -155,7 +151,7 @@ async function load() {
       const requestedFolder = Number(new URLSearchParams(location.search).get('folder'));
       await loadFolder(Number.isSafeInteger(requestedFolder) && requestedFolder > 0 ? requestedFolder : undefined); expireWhenDue(); return;
     }
-    status.textContent = `Available until ${new Date(expiresAt).toLocaleString()}.`;
+    status.textContent = neverExpires ? 'This link does not expire.' : `Available until ${new Date(expiresAt).toLocaleString()}.`;
     download.href = `${base}/download`; download.hidden = false;
     const url = `${base}/content`;
     if (info.kind === 'text' && !info.textTooLarge) {

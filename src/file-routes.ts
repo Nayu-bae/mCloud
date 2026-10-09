@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, unlinkSync, renameSync, existsSync } from 'node:fs';
 import { open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Files, StoredFile, FolderError } from './files.js';
+import { Files, StoredFile, FolderError, INFINITE_SHARE_EXPIRY } from './files.js';
 import { Account } from './users.js';
 
 const MAX_UPLOAD = 100 * 1024 * 1024;
@@ -53,11 +53,11 @@ export function fileRoutes(files: Files, directory: string, currentUser: (req: e
     res.status(201).json({ folder });
   });
   router.get('/folders/:id/shares', (req, res) => {
-    res.json({ links: files.folderShares(res.locals.userId, Number(req.params.id)) });
+    res.json({ links: files.folderShares(res.locals.userId, Number(req.params.id)).map(link => ({ ...link, neverExpires: link.expires_at === INFINITE_SHARE_EXPIRY })) });
   });
   router.post('/folders/:id/shares', (req, res) => {
     const share = files.createFolderShare(res.locals.userId, Number(req.params.id), req.body?.durationMinutes);
-    res.status(201).json({ id: share.id, expiresAt: share.expires_at, path: `/s/${share.token}` });
+    res.status(201).json({ id: share.id, expiresAt: share.expires_at, neverExpires: share.expires_at === INFINITE_SHARE_EXPIRY, path: `/s/${share.token}` });
   });
   router.delete('/folders/:id/shares/:shareId', (req, res) => {
     files.revokeFolderShare(res.locals.userId, Number(req.params.id), Number(req.params.shareId));
@@ -120,11 +120,11 @@ export function fileRoutes(files: Files, directory: string, currentUser: (req: e
     }
   });
   router.get('/:id/shares', (req, res) => {
-    res.json({ links: files.shares(res.locals.userId, Number(req.params.id)) });
+    res.json({ links: files.shares(res.locals.userId, Number(req.params.id)).map(link => ({ ...link, neverExpires: link.expires_at === INFINITE_SHARE_EXPIRY })) });
   });
   router.post('/:id/shares', (req, res) => {
     const share = files.createShare(res.locals.userId, Number(req.params.id), req.body?.durationMinutes);
-    res.status(201).json({ id: share.id, expiresAt: share.expires_at, path: `/s/${share.token}` });
+    res.status(201).json({ id: share.id, expiresAt: share.expires_at, neverExpires: share.expires_at === INFINITE_SHARE_EXPIRY, path: `/s/${share.token}` });
   });
   router.delete('/:id/shares/:shareId', (req, res) => {
     files.revokeShare(res.locals.userId, Number(req.params.id), Number(req.params.shareId));

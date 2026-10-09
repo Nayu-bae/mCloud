@@ -31,11 +31,11 @@ test('temporary folder links expose only descendants and permit scoped uploads a
     const outside = (await (await upload(cookie, sibling.id, 'outside.txt', 'outside data')).json()).file;
     const endpoint = `/api/files/folders/${shared.id}/shares`;
     assert.equal((await json(endpoint, 'POST', { durationMinutes: 60 })).status, 401);
-    const created = await json(endpoint, 'POST', { durationMinutes: 60 }, cookie);
+    const created = await json(endpoint, 'POST', { durationMinutes: 'infinite' }, cookie);
     assert.equal(created.status, 201);
-    const link = await created.json();
-    const page = await fetch(base + link.path); assert.equal(page.status, 200); assert.match(await page.text(), /Temporary shared folder/);
-    const info = await (await fetch(base + link.path + '/info')).json(); assert.equal(info.type, 'folder'); assert.equal(info.name, 'Shared work');
+    const link = await created.json(); assert.equal(link.neverExpires, true);
+    const page = await fetch(base + link.path); assert.equal(page.status, 200); assert.match(await page.text(), /Shared folder · Full access · Does not expire/);
+    const info = await (await fetch(base + link.path + '/info')).json(); assert.equal(info.type, 'folder'); assert.equal(info.name, 'Shared work'); assert.equal(info.neverExpires, true);
     const root = await (await fetch(base + link.path + '/folders')).json();
     assert.deepEqual(root.path.map(item => item.name), ['Shared work']);
     assert.deepEqual(root.folders.map(item => item.name), ['Child']);

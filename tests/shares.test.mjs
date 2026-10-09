@@ -27,7 +27,7 @@ test('temporary links are file-scoped, persistent, expiring, revocable, and owne
     const endpoint=`/api/files/${file.id}/shares`;
     assert.equal((await json(endpoint,'POST',{durationMinutes:60})).status,401);
     assert.equal((await json(endpoint,'POST',{durationMinutes:60},owner)).status,404);
-    for (const durationMinutes of [0,-1,43201,1.5,'60',null]) assert.equal((await json(endpoint,'POST',{durationMinutes},cookie)).status,400);
+    for (const durationMinutes of [0,-1,525601,1.5,'60',null]) assert.equal((await json(endpoint,'POST',{durationMinutes},cookie)).status,400);
     assert.equal((await fetch(base+endpoint,{headers:{cookie:owner}})).status,404);
     const before=Date.now();const created=await json(endpoint,'POST',{durationMinutes:60},cookie);assert.equal(created.status,201);
     const share=await created.json();assert.ok(share.expiresAt>=before+60*60000);
@@ -37,7 +37,7 @@ test('temporary links are file-scoped, persistent, expiring, revocable, and owne
     assert.equal(stored,createHash('sha256').update(token).digest('hex'));assert.notEqual(stored,token);
     const reopened=new Files(database);assert.equal(reopened.resolveShare(token).id,file.id);reopened.close();
     const page=await fetch(base+share.path);assert.equal(page.status,200);assert.match(page.headers.get('x-robots-tag'),/noindex/);
-    const pageHtml=await page.text();assert.match(pageHtml,/property="og:title" content="private\.html"/);assert.match(pageHtml,/property="og:description" content="Temporary shared file/);
+    const pageHtml=await page.text();assert.match(pageHtml,/property="og:title" content="private\.html"/);assert.match(pageHtml,/property="og:description" content="Shared file/);
     assert.match(pageHtml,new RegExp(`property="og:url" content="https://cloud\\.example\\.test${share.path}"`));assert.doesNotMatch(pageHtml,/property="og:image"/);
     const info=await (await fetch(base+share.path+'/info')).json();assert.equal(info.name,'private.html');assert.equal(info.kind,'text');
     assert.equal('storage_key' in info,false);assert.equal('userId' in info,false);
@@ -56,11 +56,17 @@ test('temporary links are file-scoped, persistent, expiring, revocable, and owne
     assert.equal((await json(`/api/files/${other.id}/shares/${share.id}`,'DELETE',{},cookie)).status,404);
     assert.equal((await json(`${endpoint}/${share.id}`,'DELETE',{},cookie)).status,204);
     for (const suffix of ['', '/info','/content','/download']) assert.equal((await fetch(base+share.path+suffix)).status,404);
+    const infiniteResponse=await json(endpoint,'POST',{durationMinutes:'infinite'},cookie);assert.equal(infiniteResponse.status,201);
+    const infinite=await infiniteResponse.json();assert.equal(infinite.neverExpires,true);
+    const infiniteInfo=await (await fetch(base+infinite.path+'/info')).json();assert.equal(infiniteInfo.neverExpires,true);
+    assert.equal((await (await fetch(base+endpoint,{headers:{cookie}})).json()).links[0].neverExpires,true);
+    assert.equal((await json(`${endpoint}/${infinite.id}`,'DELETE',{},cookie)).status,204);
+    assert.equal((await fetch(base+infinite.path+'/info')).status,404);
     const expiring=await (await json(endpoint,'POST',{durationMinutes:1},cookie)).json();
     db.prepare('UPDATE file_shares SET created_at = ?, expires_at = ? WHERE id = ?').run(Date.now()-120000,Date.now()-60000,expiring.id);
     for (const suffix of ['', '/info','/content','/download']) assert.equal((await fetch(base+expiring.path+suffix)).status,404);
     assert.equal((await fetch(base+'/s/'+'x'.repeat(43)+'/download')).status,404);
-    const deleted=await (await json(endpoint,'POST',{durationMinutes:43200},cookie)).json();
+    const deleted=await (await json(endpoint,'POST',{durationMinutes:525600},cookie)).json();
     await json(`/api/files/${file.id}`,'DELETE',{},cookie);
     assert.equal((await fetch(base+deleted.path+'/download')).status,404);
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM file_shares WHERE file_id = ?').get(file.id).n,0);

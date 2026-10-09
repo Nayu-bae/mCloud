@@ -4,7 +4,7 @@ import { existsSync, readFileSync, mkdirSync, renameSync } from 'node:fs';
 import { open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Files, FolderError, ResolvedFolderShare, StoredFile } from './files.js';
+import { Files, FolderError, ResolvedFolderShare, StoredFile, INFINITE_SHARE_EXPIRY } from './files.js';
 import { inspectPreview, previewType } from './previews.js';
 
 const sharePagePath = fileURLToPath(new URL('../public/share.html', import.meta.url));
@@ -14,6 +14,7 @@ const validName = (name: unknown): name is string => typeof name === 'string' &&
 const publicFile = (file: StoredFile) => ({ id: file.id, name: file.original_name, size: file.size_bytes, createdAt: file.created_at, folderId: file.folder_id, previewKind: previewType(file.original_name).kind });
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const sizeLabel = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const expiryDescription = (expiresAt: number) => expiresAt === INFINITE_SHARE_EXPIRY ? 'Does not expire' : `Available until ${new Date(expiresAt).toISOString()}`;
 
 export function shareRoutes(files: Files, directory: string, publicUrl?: string, maxUpload = MAX_UPLOAD) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -45,7 +46,7 @@ export function shareRoutes(files: Files, directory: string, publicUrl?: string,
     const folder = folderShare(req.params.token);
     if (folder) {
       const shareUrl = `${originFor(req)}/s/${encodeURIComponent(req.params.token)}`;
-      const description = `Temporary shared folder · Upload access · Available until ${new Date(folder.expires_at).toISOString()}`;
+      const description = `Shared folder · Full access · ${expiryDescription(folder.expires_at)}`;
       const tags = [['og:site_name', 'mCloud'], ['og:type', 'website'], ['og:title', folder.name], ['og:description', description], ['og:url', shareUrl], ['twitter:card', 'summary'], ['twitter:title', folder.name], ['twitter:description', description]];
       const metadata = tags.map(([property, content]) => `<meta property="${property}" content="${escapeHtml(content)}">`).join('');
       const html = sharePage.replace('<!-- SHARE_META -->', metadata).replace('<title>Shared item · mCloud</title>', `<title>${escapeHtml(folder.name)} · mCloud</title>`).replace('<title>Shared file · mCloud</title>', `<title>${escapeHtml(folder.name)} · mCloud</title>`);
@@ -60,7 +61,7 @@ export function shareRoutes(files: Files, directory: string, publicUrl?: string,
       const shareUrl = `${originFor(req)}/s/${encodeURIComponent(req.params.token)}`;
       const contentUrl = `${shareUrl}/content`;
       const title = file.original_name;
-      const description = `Temporary shared file · ${sizeLabel(file.size_bytes)} · Available until ${new Date(file.expires_at).toISOString()}`;
+      const description = `Shared file · ${sizeLabel(file.size_bytes)} · ${expiryDescription(file.expires_at)}`;
       const tags = [
         ['og:site_name', 'mCloud'], ['og:type', 'website'], ['og:title', title], ['og:description', description], ['og:url', shareUrl],
         ['twitter:card', preview.kind === 'image' ? 'summary_large_image' : 'summary'], ['twitter:title', title], ['twitter:description', description]
@@ -75,13 +76,13 @@ export function shareRoutes(files: Files, directory: string, publicUrl?: string,
   });
   router.get('/:token/info', async (req, res, next) => {
     const folder = folderShare(req.params.token);
-    if (folder) { res.json({ type: 'folder', name: folder.name, expiresAt: folder.expires_at, maxUploadBytes: maxUpload }); return; }
+    if (folder) { res.json({ type: 'folder', name: folder.name, expiresAt: folder.expires_at, neverExpires: folder.expires_at === INFINITE_SHARE_EXPIRY, maxUploadBytes: maxUpload }); return; }
     const file = files.resolveShare(req.params.token);
     if (!file || !existsSync(join(directory, file.storage_key))) { unavailable(res); return; }
     try {
       const preview = await inspectPreview(join(directory, file.storage_key), file.original_name);
       if (!files.resolveShare(req.params.token)) { unavailable(res); return; }
-      res.json({ type: 'file', name: file.original_name, size: file.size_bytes, expiresAt: file.expires_at, kind: preview.kind, textTooLarge: preview.kind === 'text' && file.size_bytes > 1024 * 1024 });
+      res.json({ type: 'file', name: file.original_name, size: file.size_bytes, expiresAt: file.expires_at, neverExpires: file.expires_at === INFINITE_SHARE_EXPIRY, kind: preview.kind, textTooLarge: preview.kind === 'text' && file.size_bytes > 1024 * 1024 });
     } catch (error) { next(error); }
   });
   router.get('/:token/folders', (req, res, next) => {
@@ -96,6 +97,7 @@ export function shareRoutes(files: Files, directory: string, publicUrl?: string,
         files: contents.files.map(publicFile),
         destinations: files.foldersWithin(share.user_id, share.id).map(folder => ({ id: folder.id, name: folder.name, parentId: folder.id === share.id ? null : folder.parent_id })),
         expiresAt: share.expires_at,
+        neverExpires: share.expires_at === INFINITE_SHARE_EXPIRY,
         maxUploadBytes: maxUpload
       });
     } catch (error) { next(error); }

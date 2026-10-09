@@ -9,7 +9,14 @@ export class FolderError extends Error { constructor(message: string, public sta
 
 export type ShareLink = { id: number; created_at: number; expires_at: number; revoked_at: number | null };
 export type ResolvedFolderShare = Folder & { user_id: number; expires_at: number };
+export const INFINITE_SHARE_EXPIRY = 8_640_000_000_000_000;
+const MAX_SHARE_MINUTES = 525600;
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+const shareExpiry = (durationMinutes: unknown, now: number) => {
+  if (durationMinutes === 'infinite') return INFINITE_SHARE_EXPIRY;
+  if (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > MAX_SHARE_MINUTES) throw new FolderError('Choose a duration between 1 minute and 12 months, or choose infinite.');
+  return now + durationMinutes * 60000;
+};
 
 export class Files {
   private db;
@@ -147,12 +154,11 @@ export class Files {
 
   createShare(userId: number, fileId: number, durationMinutes: unknown): ShareLink & { token: string } {
     if (!this.getForUser(userId, fileId)) throw new FolderError('File not found.', 404);
-    if (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 43200) throw new FolderError('Choose a duration between 1 minute and 30 days.');
     const now = Date.now();
     const count = this.db.prepare('SELECT COUNT(*) AS n FROM file_shares WHERE file_id = ? AND revoked_at IS NULL AND expires_at > ?').get(fileId, now);
     if (Number(count?.n) >= 20) throw new FolderError('This file already has 20 active links. Revoke an existing link first.', 409);
     const token = randomBytes(32).toString('base64url');
-    const expiresAt = now + durationMinutes * 60000;
+    const expiresAt = shareExpiry(durationMinutes, now);
     const result = this.db.prepare('INSERT INTO file_shares (file_id, created_by, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(fileId, userId, hashToken(token), now, expiresAt);
     return { id: Number(result.lastInsertRowid), created_at: now, expires_at: expiresAt, revoked_at: null, token };
   }
@@ -170,12 +176,11 @@ export class Files {
 
   createFolderShare(userId: number, folderId: number, durationMinutes: unknown): ShareLink & { token: string } {
     if (!this.folder(userId, folderId)) throw new FolderError('Folder not found.', 404);
-    if (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 43200) throw new FolderError('Choose a duration between 1 minute and 30 days.');
     const now = Date.now();
     const count = this.db.prepare('SELECT COUNT(*) AS n FROM folder_shares WHERE folder_id = ? AND revoked_at IS NULL AND expires_at > ?').get(folderId, now);
     if (Number(count?.n) >= 20) throw new FolderError('This folder already has 20 active links. Revoke an existing link first.', 409);
     const token = randomBytes(32).toString('base64url');
-    const expiresAt = now + durationMinutes * 60000;
+    const expiresAt = shareExpiry(durationMinutes, now);
     const result = this.db.prepare('INSERT INTO folder_shares (folder_id, created_by, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(folderId, userId, hashToken(token), now, expiresAt);
     return { id: Number(result.lastInsertRowid), created_at: now, expires_at: expiresAt, revoked_at: null, token };
   }
