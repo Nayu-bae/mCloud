@@ -52,6 +52,17 @@ export function fileRoutes(files: Files, directory: string, currentUser: (req: e
     const folder = files.createFolder(res.locals.userId, req.body.name.trim(), parseFolder(req.body.parentId));
     res.status(201).json({ folder });
   });
+  router.get('/folders/:id/shares', (req, res) => {
+    res.json({ links: files.folderShares(res.locals.userId, Number(req.params.id)) });
+  });
+  router.post('/folders/:id/shares', (req, res) => {
+    const share = files.createFolderShare(res.locals.userId, Number(req.params.id), req.body?.durationMinutes);
+    res.status(201).json({ id: share.id, expiresAt: share.expires_at, path: `/s/${share.token}` });
+  });
+  router.delete('/folders/:id/shares/:shareId', (req, res) => {
+    files.revokeFolderShare(res.locals.userId, Number(req.params.id), Number(req.params.shareId));
+    res.status(204).end();
+  });
   router.patch('/folders/:id', (req, res) => {
     if (!validName(req.body?.name)) { res.status(400).json({ error: 'Enter a valid folder name.' }); return; }
     files.renameFolder(res.locals.userId, Number(req.params.id), req.body.name.trim());

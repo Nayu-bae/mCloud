@@ -166,3 +166,12 @@ html[data-theme="dark"] .guest-controls .theme-switch{color:#a8b8ad}
 html[data-theme="dark"] .upload-box::after{border-color:#81a477;background:#1b2b22ee;color:#c7ddc0}
 html[data-theme="dark"] .upload-box.drag-active{border-color:#72956a;background:#213429;box-shadow:0 0 0 4px #74966a38,0 16px 40px #0007}
 html[data-theme="dark"] .drop-zone-content>span{color:#91a297}html[data-theme="dark"] .drop-zone-icon{background:#2b4033;color:#b7d1aa}html[data-theme="dark"] .upload-box.drag-active .drop-zone-icon{background:#36513f}
+
+/* Temporary shared folders */
+.shared-card:has(#shared-folder-view:not([hidden])){max-width:1100px}.shared-folder-path{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:20px 0;overflow-wrap:anywhere}
+.shared-folder-tools{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px}.shared-upload{display:inline-flex;align-items:center;justify-content:center;gap:7px;margin:0;padding:10px 14px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap}.shared-upload:hover{background:#dce7d2}
+#open-shared-new-folder{width:auto;margin:0;padding:11px 14px;white-space:nowrap}#shared-folder-dialog form{margin:0}#shared-folder-dialog .dialog-actions button{width:100%}
+#shared-folder-message{min-height:20px;margin:12px 0 0;color:#5c705d;font-size:13px;line-height:1.5}.shared-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));align-items:start;gap:18px;margin:24px 0}.shared-folder-grid>.empty{grid-column:1/-1}
+.shared-folder-grid .album-tile{text-decoration:none}.shared-folder-grid .album-menu-items{top:38px}.shared-folder-grid .album-action{box-sizing:border-box}
+html[data-theme="dark"] #shared-folder-message{color:#9eb2a2}
+@media(max-width:700px){.shared-folder-tools{align-items:stretch;justify-content:flex-start;flex-direction:column}#open-shared-new-folder,.shared-upload{width:100%}.shared-folder-grid{grid-template-columns:1fr}}

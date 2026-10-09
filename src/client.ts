@@ -507,6 +507,7 @@ function renderAlbum() {
     const headingName = document.createElement('strong'); headingName.textContent = folder.name; headingName.title = folder.name;
     heading.append(kind, headingName, albumMenu(
       albumAction('Open', 'folder-open', `Open folder ${folder.name}`, () => navigateFolder(folder.id)),
+      albumAction('Share link', 'link-2', `Create a temporary link for ${folder.name}`, () => openShare(folder, 'folder')),
       albumAction('Move', 'folder-input', `Move folder ${folder.name}`, () => openBulk('move', { fileIds: [], folderIds: [folder.id] })),
       albumAction('Rename', 'pencil', `Rename folder ${folder.name}`, () => openFolderDialog('rename-folder', folder.id)),
       albumAction('Delete', 'trash-2', `Delete folder ${folder.name}`, () => openFolderDialog('delete-folder', folder.id), true)
@@ -784,13 +785,20 @@ const shareUrl = document.querySelector<HTMLInputElement>('#share-url')!;
 const shareDuration = document.querySelector<HTMLInputElement>('#share-duration')!;
 const shareUnit = document.querySelector<HTMLSelectElement>('#share-unit')!;
 const createShareButton = document.querySelector<HTMLButtonElement>('#create-share')!;
-let sharedFile: LibraryFile | undefined;
+let sharedTarget: { id: number; name: string; kind: 'file' | 'folder' } | undefined;
 let shareGeneration = 0;
 let createdShareId: number | undefined;
-function openShare(file: LibraryFile) {
-  sharedFile = file; shareGeneration++;
+function shareEndpoint(target: { id: number; kind: 'file' | 'folder' }) {
+  return target.kind === 'folder' ? `/api/files/folders/${target.id}/shares` : `/api/files/${target.id}/shares`;
+}
+function openShare(item: LibraryFile | LibraryFolder, kind: 'file' | 'folder' = 'file') {
+  sharedTarget = { id: item.id, name: item.name, kind }; shareGeneration++;
   createdShareId = undefined;
-  document.querySelector('#share-filename')!.textContent = file.name;
+  document.querySelector('#share-title')!.textContent = kind === 'folder' ? 'Share folder' : 'Share file';
+  document.querySelector('#share-filename')!.textContent = item.name;
+  document.querySelector('.share-notice')!.textContent = kind === 'folder'
+    ? 'Anyone with this link can browse this folder and its subfolders, upload files, and create folders until it expires. Parent folders remain hidden.'
+    : 'Anyone with this link can view or download this file until it expires. You can revoke access early below.';
   shareMessage.textContent = '';
   shareResult.hidden = true; shareUrl.value = '';
   shareForm.reset(); shareDuration.max = '30';
@@ -799,17 +807,17 @@ function openShare(file: LibraryFile) {
   if (!shareDialog.open) shareDialog.showModal();
   void loadShares();
 }
-shareDialog.addEventListener('close', () => { shareGeneration++; sharedFile = undefined; shareUrl.value = ''; shareResult.hidden = true; shareList.replaceChildren(); });
+shareDialog.addEventListener('close', () => { shareGeneration++; sharedTarget = undefined; shareUrl.value = ''; shareResult.hidden = true; shareList.replaceChildren(); });
 document.querySelector('#close-share')!.addEventListener('click', () => shareDialog.close());
 document.querySelector('#share-preview')!.addEventListener('click', () => { const file = previewFiles[previewIndex]; if (file) openShare(file); });
 shareUnit.addEventListener('change', () => { shareDuration.max = String(43200 / Number(shareUnit.value)); });
 document.querySelector('#refresh-shares')!.addEventListener('click', () => void loadShares());
 async function loadShares() {
-  if (!sharedFile) return;
-  const fileId = sharedFile.id;
+  if (!sharedTarget) return;
+  const endpoint = shareEndpoint(sharedTarget);
   const generation = shareGeneration;
   try {
-    const response = await fetch(`/api/files/${fileId}/shares`);
+    const response = await fetch(endpoint);
     if (generation !== shareGeneration) return;
     if (response.status === 401) { showSession(); return; }
     if (!response.ok) throw new Error('Could not load links. Use Refresh links to try again.');
@@ -824,7 +832,7 @@ async function loadShares() {
       revoke.addEventListener('click', async () => {
         revoke.disabled = true;
         try {
-          const response = await fetch(`/api/files/${fileId}/shares/${link.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          const response = await fetch(`${endpoint}/${link.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: '{}' });
           if (generation !== shareGeneration) return;
           if (response.status === 401) { showSession(); return; }
           if (!response.ok) throw new Error('Could not revoke this link. Please try again.');
@@ -841,12 +849,12 @@ async function loadShares() {
 }
 shareForm.addEventListener('submit', async event => {
   event.preventDefault();
-  if (!sharedFile || createShareButton.disabled) return;
+  if (!sharedTarget || createShareButton.disabled) return;
   const generation = shareGeneration;
-  const fileId = sharedFile.id;
+  const target = sharedTarget;
   createShareButton.disabled = true; setButton(createShareButton, 'Creating…', 'loader-circle'); shareMessage.textContent = '';
   try {
-    const response = await fetch(`/api/files/${fileId}/shares`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ durationMinutes: Number(shareDuration.value) * Number(shareUnit.value) }) });
+    const response = await fetch(shareEndpoint(target), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ durationMinutes: Number(shareDuration.value) * Number(shareUnit.value) }) });
     if (generation !== shareGeneration) return;
     if (response.status === 401) { showSession(); return; }
     const result = await response.json();
@@ -856,7 +864,7 @@ shareForm.addEventListener('submit', async event => {
     shareUrl.value = new URL(result.path, location.origin).href;
     shareResult.hidden = false;
     document.querySelector('#share-expiry')!.textContent = `Expires ${new Date(result.expiresAt).toLocaleString()}`;
-    shareMessage.textContent = 'Link created. Copy it to share this file.';
+    shareMessage.textContent = `Link created. Copy it to share this ${target.kind}.`;
     await loadShares();
   } catch { if (generation === shareGeneration) shareMessage.textContent = 'Could not create the link. Refresh active links before retrying.'; }
   finally { if (generation === shareGeneration) { createShareButton.disabled = false; setButton(createShareButton, 'Create link', 'link-2'); } }

@@ -41,7 +41,7 @@ const currentUser = (req: express.Request) => {
 };
 if (storage) {
   app.use('/api/files', fileRoutes(storage.files, storage.directory, currentUser, storage.maxUpload));
-  app.use('/s', shareRoutes(storage.files, storage.directory, storage.publicUrl));
+  app.use('/s', shareRoutes(storage.files, storage.directory, storage.publicUrl, storage.maxUpload));
 }
 app.get('/share.js', (_req, res) => res.sendFile(fileURLToPath(new URL('./share-client.js', import.meta.url))));
 app.get('/theme.js', (_req, res) => res.sendFile(fileURLToPath(new URL('./theme.js', import.meta.url))));

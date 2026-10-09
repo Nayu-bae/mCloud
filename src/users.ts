@@ -114,6 +114,7 @@ export class Users {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db.prepare('DELETE FROM file_shares WHERE created_by = ?').run(id);
+      this.db.prepare('DELETE FROM folder_shares WHERE created_by = ?').run(id);
       this.db.prepare('DELETE FROM files WHERE id IN (SELECT file_id FROM user_files WHERE user_id = ?)').run(id);
       let removed = 1;
       while (removed > 0) {

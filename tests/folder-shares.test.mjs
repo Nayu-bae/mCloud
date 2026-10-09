@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { Users } from '../dist/users.js';
+import { Files } from '../dist/files.js';
+import { createApp } from '../dist/app.js';
+
+test('temporary folder links expose only descendants and permit scoped uploads and folders', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcloud-folder-share-test-'));
+  const database = join(dir, 'test.sqlite');
+  const directory = join(dir, 'uploads');
+  const users = new Users(database); const files = new Files(database);
+  await users.bootstrap('owner', 'owner-test-password');
+  const member = await users.add('member', 'member-test-password');
+  const outer = files.createFolder(member.id, 'Private parent', null);
+  const shared = files.createFolder(member.id, 'Shared work', outer.id);
+  const child = files.createFolder(member.id, 'Child', shared.id);
+  const sibling = files.createFolder(member.id, 'Private sibling', outer.id);
+  const server = createApp(users, false, { files, directory, maxUpload: 64, publicUrl: 'https://cloud.example.test' }).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const json = (path, method, body, cookie = '') => fetch(base + path, { method, headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const login = async () => (await json('/api/login', 'POST', { username: 'member', password: 'member-test-password' })).headers.get('set-cookie').split(';')[0];
+  const upload = (cookie, folderId, name, body) => fetch(base + '/api/files', { method: 'POST', headers: { cookie, 'Content-Type': 'application/octet-stream', 'X-File-Name': name, 'X-Folder-Id': String(folderId) }, body });
+  try {
+    const cookie = await login();
+    const inside = (await (await upload(cookie, child.id, 'inside.txt', 'inside data')).json()).file;
+    const outside = (await (await upload(cookie, sibling.id, 'outside.txt', 'outside data')).json()).file;
+    const endpoint = `/api/files/folders/${shared.id}/shares`;
+    assert.equal((await json(endpoint, 'POST', { durationMinutes: 60 })).status, 401);
+    const created = await json(endpoint, 'POST', { durationMinutes: 60 }, cookie);
+    assert.equal(created.status, 201);
+    const link = await created.json();
+    const page = await fetch(base + link.path); assert.equal(page.status, 200); assert.match(await page.text(), /Temporary shared folder/);
+    const info = await (await fetch(base + link.path + '/info')).json(); assert.equal(info.type, 'folder'); assert.equal(info.name, 'Shared work');
+    const root = await (await fetch(base + link.path + '/folders')).json();
+    assert.deepEqual(root.path.map(item => item.name), ['Shared work']);
+    assert.deepEqual(root.folders.map(item => item.name), ['Child']);
+    assert.ok(!JSON.stringify(root).includes('Private parent') && !JSON.stringify(root).includes('Private sibling'));
+    const nested = await (await fetch(base + link.path + `/folders?folderId=${child.id}`)).json();
+    assert.deepEqual(nested.path.map(item => item.name), ['Shared work', 'Child']);
+    assert.equal(nested.files[0].name, 'inside.txt');
+    assert.equal((await fetch(base + link.path + `/folders?folderId=${outer.id}`)).status, 404);
+    assert.equal((await fetch(base + link.path + `/folders?folderId=${sibling.id}`)).status, 404);
+    assert.equal(await (await fetch(base + link.path + `/files/${inside.id}/content`)).text(), 'inside data');
+    assert.equal((await fetch(base + link.path + `/files/${outside.id}/content`)).status, 404);
+    assert.equal((await json(link.path + '/folders', 'POST', { name: 'Guest folder', parentId: outer.id })).status, 404);
+    const guestFolderResponse = await json(link.path + '/folders', 'POST', { name: 'Guest folder', parentId: child.id });
+    assert.equal(guestFolderResponse.status, 201);
+    const guestFolder = (await guestFolderResponse.json()).folder;
+    assert.equal(guestFolder.parent_id, child.id);
+    const guestUpload = await fetch(base + link.path + '/upload', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': 'guest.txt', 'X-Folder-Id': String(guestFolder.id) }, body: 'guest data' });
+    assert.equal(guestUpload.status, 201);
+    const guestFile = (await guestUpload.json()).file;
+    assert.equal(files.getForUser(member.id, guestFile.id).folder_id, guestFolder.id);
+    assert.equal(await (await fetch(base + link.path + `/files/${guestFile.id}/download`)).text(), 'guest data');
+    const links = await (await fetch(base + endpoint, { headers: { cookie } })).json(); assert.equal(links.links.length, 1);
+    assert.equal((await json(`${endpoint}/${link.id}`, 'DELETE', {}, cookie)).status, 204);
+    for (const suffix of ['', '/info', '/folders', `/files/${inside.id}/content`]) assert.equal((await fetch(base + link.path + suffix)).status, 404);
+  } finally {
+    await new Promise(resolve => server.close(resolve)); users.close(); files.close(); rmSync(dir, { recursive: true, force: true });
+  }
+});

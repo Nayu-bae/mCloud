@@ -8,6 +8,7 @@ export type Folder = { id: number; name: string; parent_id: number | null; creat
 export class FolderError extends Error { constructor(message: string, public status = 400) { super(message); } }
 
 export type ShareLink = { id: number; created_at: number; expires_at: number; revoked_at: number | null };
+export type ResolvedFolderShare = Folder & { user_id: number; expires_at: number };
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 export class Files {
@@ -165,6 +166,66 @@ export class Files {
     if (!this.getForUser(userId, fileId)) throw new FolderError('File not found.', 404);
     const result = this.db.prepare('UPDATE file_shares SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ? AND file_id = ? AND created_by = ?').run(Date.now(), shareId, fileId, userId);
     if (Number(result.changes) === 0) throw new FolderError('Share link not found.', 404);
+  }
+
+  createFolderShare(userId: number, folderId: number, durationMinutes: unknown): ShareLink & { token: string } {
+    if (!this.folder(userId, folderId)) throw new FolderError('Folder not found.', 404);
+    if (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 43200) throw new FolderError('Choose a duration between 1 minute and 30 days.');
+    const now = Date.now();
+    const count = this.db.prepare('SELECT COUNT(*) AS n FROM folder_shares WHERE folder_id = ? AND revoked_at IS NULL AND expires_at > ?').get(folderId, now);
+    if (Number(count?.n) >= 20) throw new FolderError('This folder already has 20 active links. Revoke an existing link first.', 409);
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = now + durationMinutes * 60000;
+    const result = this.db.prepare('INSERT INTO folder_shares (folder_id, created_by, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(folderId, userId, hashToken(token), now, expiresAt);
+    return { id: Number(result.lastInsertRowid), created_at: now, expires_at: expiresAt, revoked_at: null, token };
+  }
+
+  folderShares(userId: number, folderId: number): ShareLink[] {
+    if (!this.folder(userId, folderId)) throw new FolderError('Folder not found.', 404);
+    return this.db.prepare('SELECT id, created_at, expires_at, revoked_at FROM folder_shares WHERE folder_id = ? AND created_by = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY id DESC').all(folderId, userId, Date.now()) as ShareLink[];
+  }
+
+  revokeFolderShare(userId: number, folderId: number, shareId: number): void {
+    if (!this.folder(userId, folderId)) throw new FolderError('Folder not found.', 404);
+    const result = this.db.prepare('UPDATE folder_shares SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ? AND folder_id = ? AND created_by = ?').run(Date.now(), shareId, folderId, userId);
+    if (Number(result.changes) === 0) throw new FolderError('Share link not found.', 404);
+  }
+
+  resolveFolderShare(token: string): ResolvedFolderShare | undefined {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
+    return this.db.prepare(`SELECT folders.id, folders.name, folders.parent_id, folders.created_at, folders.user_id, folder_shares.expires_at
+      FROM folder_shares JOIN folders ON folders.id = folder_shares.folder_id
+      WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ? AND folders.user_id = folder_shares.created_by`).get(hashToken(token), Date.now()) as ResolvedFolderShare | undefined;
+  }
+
+  folderWithin(userId: number, rootId: number, folderId: number): boolean {
+    return Boolean(this.db.prepare(`WITH RECURSIVE descendants(id) AS (
+      SELECT id FROM folders WHERE id = ? AND user_id = ?
+      UNION ALL SELECT folders.id FROM folders JOIN descendants ON folders.parent_id = descendants.id WHERE folders.user_id = ?
+    ) SELECT 1 FROM descendants WHERE id = ?`).get(rootId, userId, userId, folderId));
+  }
+
+  sharedFolderContents(share: ResolvedFolderShare, folderId: number): { folder: Folder; folders: Folder[]; files: StoredFile[]; path: Folder[] } {
+    if (!this.folderWithin(share.user_id, share.id, folderId)) throw new FolderError('Folder not found.', 404);
+    const folder = this.folder(share.user_id, folderId)!;
+    const folders = this.db.prepare('SELECT id, name, parent_id, created_at FROM folders WHERE user_id = ? AND parent_id = ? ORDER BY name COLLATE NOCASE').all(share.user_id, folderId) as Folder[];
+    const files = this.db.prepare(`SELECT files.*, user_files.folder_id FROM files JOIN user_files ON files.id = user_files.file_id
+      WHERE user_files.user_id = ? AND user_files.folder_id = ? ORDER BY files.id DESC`).all(share.user_id, folderId) as StoredFile[];
+    const path: Folder[] = [];
+    let current: Folder | undefined = folder;
+    while (current) {
+      path.unshift(current);
+      if (current.id === share.id) break;
+      current = current.parent_id === null ? undefined : this.folder(share.user_id, current.parent_id);
+    }
+    if (!path.length || path[0].id !== share.id) throw new FolderError('Folder not found.', 404);
+    return { folder, folders, files, path };
+  }
+
+  sharedFile(share: ResolvedFolderShare, fileId: number): StoredFile | undefined {
+    const file = this.getForUser(share.user_id, fileId);
+    if (!file || file.folder_id === null) return undefined;
+    return this.folderWithin(share.user_id, share.id, file.folder_id) ? file : undefined;
   }
 
   resolveShare(token: string): (StoredFile & { expires_at: number }) | undefined {
