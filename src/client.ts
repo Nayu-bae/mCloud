@@ -14,6 +14,7 @@ const homePanel = document.querySelector<HTMLElement>('#home-panel')!;
 const error = document.querySelector<HTMLElement>('#error')!;
 const submit = document.querySelector<HTMLButtonElement>('#submit')!;
 type Account = { id: number; username: string; role: 'admin' | 'user' };
+type AdminAccount = Account & { storageBytes: number };
 const adminPanel = document.querySelector<HTMLElement>('#admin-panel')!;
 const userForm = document.querySelector<HTMLFormElement>('#add-user')!;
 const userList = document.querySelector<HTMLElement>('#user-list')!;
@@ -82,14 +83,19 @@ async function loadUsers() {
     const data = await response.json();
     if (version !== sessionVersion) return;
     userList.replaceChildren();
-    for (const user of data.users as Account[]) {
+    for (const user of data.users as AdminAccount[]) {
       const row = document.createElement('li');
       const name = document.createElement('span');
+      name.className = 'user-name';
       name.textContent = user.username;
       const role = document.createElement('span');
       role.className = 'badge';
       role.textContent = user.role === 'admin' ? 'Admin' : 'User';
-      row.append(name, role);
+      const storage = document.createElement('span');
+      storage.className = 'user-storage';
+      storage.textContent = sizeLabel(user.storageBytes);
+      storage.title = `${user.storageBytes.toLocaleString()} bytes stored`;
+      row.append(name, role, storage);
       if (user.role !== 'admin') {
         const remove = document.createElement('button');
         remove.type = 'button'; remove.className = 'text-button danger'; remove.append(icon('trash-2'), 'Delete');

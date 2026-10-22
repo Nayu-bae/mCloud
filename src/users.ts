@@ -25,6 +25,7 @@ async function verifyPassword(password: string, encoded: string): Promise<boolea
 }
 
 export type Account = { id: number; username: string; role: 'admin' | 'user' };
+export type AccountWithStorage = Account & { storageBytes: number };
 type UserRow = Account & { password_hash: string };
 export class UserInputError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -45,6 +46,17 @@ export class Users {
 
   list(): Account[] {
     return this.db.prepare('SELECT id, username, role FROM users ORDER BY id').all() as Account[];
+  }
+
+  listWithStorage(): AccountWithStorage[] {
+    const rows = this.db.prepare(`SELECT users.id, users.username, users.role,
+      COALESCE(SUM(files.size_bytes), 0) AS storage_bytes
+      FROM users
+      LEFT JOIN user_files ON user_files.user_id = users.id
+      LEFT JOIN files ON files.id = user_files.file_id
+      GROUP BY users.id, users.username, users.role
+      ORDER BY users.id`).all() as (Account & { storage_bytes: number })[];
+    return rows.map(({ storage_bytes, ...account }) => ({ ...account, storageBytes: Number(storage_bytes) }));
   }
 
   count(): number { return Number(this.db.prepare('SELECT COUNT(*) AS count FROM users').get()?.count); }

@@ -176,3 +176,5 @@ html[data-theme="dark"] .drop-zone-content>span{color:#91a297}html[data-theme="d
 .shared-folder-grid .album-tile{text-decoration:none}.shared-folder-grid .album-menu-items{top:38px}.shared-folder-grid .album-action{box-sizing:border-box}
 html[data-theme="dark"] #shared-folder-message{color:#9eb2a2}
 @media(max-width:700px){.shared-folder-tools{align-items:stretch;justify-content:flex-start;flex-direction:column}#open-shared-new-folder,.shared-upload{width:100%}.shared-folder-grid{grid-template-columns:1fr}}
+.user-storage{min-width:64px;text-align:right;color:#69736b;font-variant-numeric:tabular-nums;white-space:nowrap}
+html[data-theme="dark"] .user-storage{color:#9eb2a2}

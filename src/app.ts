@@ -92,7 +92,7 @@ app.use('/api/admin', (req, res, next) => {
   if (user.role !== 'admin') { res.status(403).json({ error: 'Administrator access required.' }); return; }
   next();
 });
-app.get('/api/admin/users', (_req, res) => res.json({ users: users.list() }));
+app.get('/api/admin/users', (_req, res) => res.json({ users: users.listWithStorage() }));
 app.post('/api/admin/users', async (req, res, next) => {
   try {
     // All web-created accounts are ordinary users, regardless of submitted role fields.

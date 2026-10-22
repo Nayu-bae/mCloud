@@ -62,6 +62,7 @@ test('admin-only creation, login for new users, no role escalation, and logout p
     const body = await list.json();
     assert.equal(body.users.length, 2);
     assert.ok(body.users.every(user => !('password_hash' in user) && !('password' in user)));
+    assert.ok(body.users.every(user => user.storageBytes === 0));
     await post('/api/logout', {}, adminCookie);
     assert.equal((await post('/api/admin/users', { username: 'after-logout', password: 'another-password' }, adminCookie)).status, 401);
     assert.equal(users.count(), 2);
